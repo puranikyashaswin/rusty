@@ -1,0 +1,32 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Temporary files
+.tmp/
+*.log
+
+# Model weights (too large for git)
+*.safetensors
+*.bin
+*.gguf
+*.ggml
+
+# Checkpoints
+checkpoints/
+*.checkpoint
+
+# Python (if any scripts)
+__pycache__/
+*.pyc
+.env
+
+# Cargo lock (optional - keep for binary crates)
+# Cargo.lock

@@ -1,0 +1,42 @@
+[package]
+name = "rusty"
+version = "0.1.0"
+edition = "2021"
+authors = ["Puranik Yashaswin Sharma"]
+description = "GPU-accelerated machine learning library for training and inference in Rust"
+license = "MIT"
+repository = "https://github.com/puranik/rusty"
+documentation = "https://docs.rs/rusty"
+readme = "../README.md"
+keywords = ["machine-learning", "deep-learning", "gpu", "neural-networks", "transformer"]
+categories = ["science::ml", "algorithms"]
+
+[dependencies]
+# GPU Backend
+wgpu = "0.20"
+pollster = "0.3"
+bytemuck = { version = "1.18", features = ["derive"] }
+
+# Model Loading
+memmap2 = "0.9"
+safetensors = "0.4"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error Handling
+thiserror = "2.0"
+
+# Utilities
+rand = "0.8"
+log = "0.4"
+
+[dev-dependencies]
+env_logger = "0.11"
+criterion = "0.5"
+
+[features]
+default = ["metal"]
+metal = []
+vulkan = []

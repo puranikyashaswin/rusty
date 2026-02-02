@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "rusty",
+    "rusty-loader",
+    "rusty-graph",
+    "rusty-backend",
+    "rusty-cli",
+    "rusty-autograd",
+    "rusty-trainer",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+authors = ["Puranik Yashaswin Sharma"]
+repository = "https://github.com/puranik/rusty"
