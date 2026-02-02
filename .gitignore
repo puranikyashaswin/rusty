@@ -2,6 +2,9 @@
 /target/
 **/*.rs.bk
 
+# Cargo cache (should not be in repo)
+.cargo/
+
 # IDE
 .idea/
 .vscode/
