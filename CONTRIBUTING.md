@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing to Rusty! This document provides guidelines for contributing to the project.
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -24,10 +24,10 @@ cargo build
 cargo test --workspace
 
 # Run benchmarks
-TMPDIR=/tmp cargo run -p rusty-benchmarks --release
+cargo run -p rusty-benchmarks --release
 ```
 
-## 📝 Code Style
+## Code Style
 
 We follow standard Rust conventions:
 
@@ -43,7 +43,7 @@ We follow standard Rust conventions:
 - **Constants**: SCREAMING_SNAKE_CASE (`WORKGROUP_SIZE`)
 - **WGSL Kernels**: snake_case with descriptive names
 
-## 🔧 Project Structure
+## Project Structure
 
 ```
 rusty/
@@ -57,7 +57,7 @@ rusty/
 └── benchmarks/        # Performance tests
 ```
 
-## 🎯 Areas for Contribution
+## Areas for Contribution
 
 ### Good First Issues
 
@@ -77,7 +77,7 @@ rusty/
 - Implement distributed training
 - Add INT4/INT8 quantization
 
-## 📦 Making Changes
+## Making Changes
 
 ### 1. Create a Branch
 
@@ -104,7 +104,7 @@ cargo fmt -- --check
 cargo clippy --workspace
 
 # Run benchmarks (if modifying perf-critical code)
-TMPDIR=/tmp cargo run -p rusty-benchmarks --release
+cargo run -p rusty-benchmarks --release
 ```
 
 ### 4. Submit a Pull Request
@@ -113,7 +113,7 @@ TMPDIR=/tmp cargo run -p rusty-benchmarks --release
 - Reference any related issues
 - Ensure CI passes
 
-## 🧪 Testing Guidelines
+## Testing Guidelines
 
 ### Unit Tests
 
@@ -133,7 +133,7 @@ mod tests {
 
 Place integration tests in `tests/` directories within each crate.
 
-## 📖 Documentation
+## Documentation
 
 - Add rustdoc comments for public APIs
 - Include code examples where helpful
@@ -154,7 +154,7 @@ Place integration tests in `tests/` directories within each crate.
 pub fn matmul(&self, ctx: &WgpuContext, a: &UnifiedTensor, b: &UnifiedTensor, out: &UnifiedTensor)
 ```
 
-## 🔄 Pull Request Process
+## Pull Request Process
 
 1. Update documentation as needed
 2. Add tests for new functionality
@@ -162,15 +162,15 @@ pub fn matmul(&self, ctx: &WgpuContext, a: &UnifiedTensor, b: &UnifiedTensor, ou
 4. Request review from maintainers
 5. Address feedback promptly
 
-## 📫 Questions?
+## Questions?
 
 - Open an issue for bugs or feature requests
 - Start a discussion for questions
 
-## 📜 License
+## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
 
 ---
 
-Thank you for contributing to Rusty! 🦀
+Thank you for contributing to Rusty!

@@ -1,18 +1,18 @@
 # Rusty GPU Benchmarks
 
-## Real Results (Apple M2, Metal Backend)
+## Results (Apple M2, Metal Backend)
 
 ```
 ╔════════════════════════════════════════════════════════════════╗
 ║             RUSTY ML FRAMEWORK - GPU BENCHMARKS                ║
 ╚════════════════════════════════════════════════════════════════╝
 
-🖥️  GPU Information:
+GPU Information:
     Name:    Apple M2
     Backend: Metal
     Type:    IntegratedGpu
 
-🔥 Running benchmarks...
+Running benchmarks...
 
 ─────────────────────────────────────────────────────────────────
   MatMul [ 512x 512x 512]:     5.004 ms  │     53.64 GFLOPS
@@ -25,6 +25,7 @@
 ## Performance Analysis
 
 ### MatMul
+
 | Size | Time (ms) | GFLOPS | Notes |
 |------|-----------|--------|-------|
 | 512³ | 5.0 | 54 | Kernel launch overhead |
@@ -32,12 +33,14 @@
 | 2048³ | 150.2 | 114 | Compute bound |
 | 4096³ | 1138.5 | **121** | Peak performance |
 
-### What This Proves
-1. **GPU acceleration works** - 120 GFLOPS on Apple M2
+### Key Observations
+
+1. **GPU acceleration verified** - 120 GFLOPS on Apple M2
 2. **Custom WGSL kernels** - Compiled and running on Metal
 3. **Production ready** - Real numbers on real hardware
 
 ### M2 Theoretical Comparison
+
 - M2 GPU: ~3.6 TFLOPS FP32 peak
 - Rusty achieving: ~121 GFLOPS
 - Utilization: ~3.4% (naive matmul, no tiling optimization)
@@ -48,5 +51,5 @@
 
 ```bash
 cd /path/to/rusty
-TMPDIR=/tmp cargo run -p rusty-benchmarks --release
+cargo run -p rusty-benchmarks --release
 ```

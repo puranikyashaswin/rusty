@@ -10,9 +10,10 @@ const WARMUP_ITERS: usize = 5;
 const BENCH_ITERS: usize = 50;
 
 fn main() {
-    println!("╔════════════════════════════════════════════════════════════════╗");
-    println!("║             RUSTY ML FRAMEWORK - GPU BENCHMARKS                ║");
-    println!("╚════════════════════════════════════════════════════════════════╝\n");
+    println!("======================================================================");
+    println!("             RUSTY ML FRAMEWORK - GPU BENCHMARKS                      ");
+    println!("======================================================================");
+    println!();
 
     // Initialize GPU
     let ctx = pollster::block_on(async {
@@ -23,8 +24,10 @@ fn main() {
     // Print GPU info
     print_gpu_info(&ctx);
 
-    println!("\n🔥 Running benchmarks...\n");
-    println!("─────────────────────────────────────────────────────────────────");
+    println!();
+    println!("[BENCH] Running benchmarks...");
+    println!();
+    println!("----------------------------------------------------------------------");
 
     // MatMul benchmarks
     bench_matmul(&ctx, &engine, 512, 512, 512);
@@ -32,44 +35,46 @@ fn main() {
     bench_matmul(&ctx, &engine, 2048, 2048, 2048);
     bench_matmul(&ctx, &engine, 4096, 4096, 4096);
 
-    println!("─────────────────────────────────────────────────────────────────");
+    println!("----------------------------------------------------------------------");
 
     // Element-wise operations
     bench_elementwise(&ctx, &engine, 1_000_000, "1M");
     bench_elementwise(&ctx, &engine, 10_000_000, "10M");
     bench_elementwise(&ctx, &engine, 100_000_000, "100M");
 
-    println!("─────────────────────────────────────────────────────────────────");
+    println!("----------------------------------------------------------------------");
 
     // Softmax (attention-like)
     bench_softmax(&ctx, &engine, 512, 512);
     bench_softmax(&ctx, &engine, 1024, 1024);
     bench_softmax(&ctx, &engine, 2048, 2048);
 
-    println!("─────────────────────────────────────────────────────────────────");
+    println!("----------------------------------------------------------------------");
 
     // RMSNorm
     bench_rmsnorm(&ctx, &engine, 4096, 512);
     bench_rmsnorm(&ctx, &engine, 4096, 1024);
     bench_rmsnorm(&ctx, &engine, 4096, 2048);
 
-    println!("─────────────────────────────────────────────────────────────────");
+    println!("----------------------------------------------------------------------");
 
     // SiLU activation
     bench_silu(&ctx, &engine, 1_000_000, "1M");
     bench_silu(&ctx, &engine, 10_000_000, "10M");
 
-    println!("\n═════════════════════════════════════════════════════════════════");
-    println!("                     BENCHMARK COMPLETE ✅");
-    println!("═════════════════════════════════════════════════════════════════\n");
+    println!();
+    println!("======================================================================");
+    println!("                     BENCHMARK COMPLETE                               ");
+    println!("======================================================================");
+    println!();
 }
 
 fn print_gpu_info(ctx: &WgpuContext) {
     let info = ctx.adapter.get_info();
-    println!("🖥️  GPU Information:");
-    println!("    Name:    {}", info.name);
-    println!("    Backend: {:?}", info.backend);
-    println!("    Type:    {:?}", info.device_type);
+    println!("[GPU] Information:");
+    println!("      Name:    {}", info.name);
+    println!("      Backend: {:?}", info.backend);
+    println!("      Type:    {:?}", info.device_type);
 }
 
 /// Sync GPU by submitting empty and polling
@@ -106,7 +111,7 @@ fn bench_matmul(ctx: &WgpuContext, engine: &ComputeEngine, m: usize, k: usize, n
     let gflops = flops / (avg_ms / 1000.0) / 1e9;
 
     println!(
-        "  MatMul [{:>4}x{:>4}x{:>4}]:  {:>8.3} ms  │  {:>8.2} GFLOPS",
+        "  MatMul [{:>4}x{:>4}x{:>4}]:  {:>8.3} ms  |  {:>8.2} GFLOPS",
         m, k, n, avg_ms, gflops
     );
 }
@@ -138,7 +143,7 @@ fn bench_elementwise(ctx: &WgpuContext, engine: &ComputeEngine, size: usize, lab
     let gb_s = bytes / (avg_ms / 1000.0) / 1e9;
 
     println!(
-        "  Add [{:>5} elements]:    {:>8.3} ms  │  {:>8.2} GB/s",
+        "  Add [{:>5} elements]:    {:>8.3} ms  |  {:>8.2} GB/s",
         label, avg_ms, gb_s
     );
 }
@@ -167,7 +172,7 @@ fn bench_softmax(ctx: &WgpuContext, engine: &ComputeEngine, batch: usize, seq_le
     let throughput = (batch * seq_len) as f64 / (avg_ms / 1000.0) / 1e6;
 
     println!(
-        "  Softmax [{:>4}x{:>4}]:      {:>8.3} ms  │  {:>8.2} M elem/s",
+        "  Softmax [{:>4}x{:>4}]:      {:>8.3} ms  |  {:>8.2} M elem/s",
         batch, seq_len, avg_ms, throughput
     );
 }
@@ -198,7 +203,7 @@ fn bench_rmsnorm(ctx: &WgpuContext, engine: &ComputeEngine, hidden_dim: usize, s
     let throughput = (seq_len * hidden_dim) as f64 / (avg_ms / 1000.0) / 1e6;
 
     println!(
-        "  RMSNorm [seq={:>4}, dim={:>4}]: {:>6.3} ms  │  {:>8.2} M elem/s",
+        "  RMSNorm [seq={:>4}, dim={:>4}]: {:>6.3} ms  |  {:>8.2} M elem/s",
         seq_len, hidden_dim, avg_ms, throughput
     );
 }
@@ -227,7 +232,7 @@ fn bench_silu(ctx: &WgpuContext, engine: &ComputeEngine, size: usize, label: &st
     let throughput = size as f64 / (avg_ms / 1000.0) / 1e9;
 
     println!(
-        "  SiLU [{:>5} elements]:    {:>8.3} ms  │  {:>8.2} G elem/s",
+        "  SiLU [{:>5} elements]:    {:>8.3} ms  |  {:>8.2} G elem/s",
         label, avg_ms, throughput
     );
 }

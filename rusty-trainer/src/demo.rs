@@ -41,42 +41,36 @@ impl Default for DemoConfig {
 /// Print a styled banner for the demo
 pub fn print_banner() {
     println!();
-    println!("╔══════════════════════════════════════════════════════════════════╗");
-    println!("║                                                                  ║");
-    println!("║   ██████╗ ██╗   ██╗███████╗████████╗██╗   ██╗                   ║");
-    println!("║   ██╔══██╗██║   ██║██╔════╝╚══██╔══╝╚██╗ ██╔╝                   ║");
-    println!("║   ██████╔╝██║   ██║███████╗   ██║    ╚████╔╝                    ║");
-    println!("║   ██╔══██╗██║   ██║╚════██║   ██║     ╚██╔╝                     ║");
-    println!("║   ██║  ██║╚██████╔╝███████║   ██║      ██║                      ║");
-    println!("║   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝      ╚═╝                      ║");
-    println!("║                                                                  ║");
-    println!("║         GPU-Accelerated ML Framework in Pure Rust               ║");
-    println!("║                                                                  ║");
-    println!("╚══════════════════════════════════════════════════════════════════╝");
+    println!("======================================================================");
+    println!("                                                                      ");
+    println!("   RUSTY - GPU-Accelerated ML Framework                               ");
+    println!("   Written in Pure Rust                                               ");
+    println!("                                                                      ");
+    println!("======================================================================");
     println!();
 }
 
 /// Print GPU information
 pub fn print_gpu_info(ctx: &WgpuContext) {
     let info = ctx.adapter.get_info();
-    println!("🖥️  GPU Information:");
-    println!("    ├─ Name:    {}", info.name);
-    println!("    ├─ Backend: {:?}", info.backend);
-    println!("    └─ Type:    {:?}", info.device_type);
+    println!("[GPU] Information:");
+    println!("      Name:    {}", info.name);
+    println!("      Backend: {:?}", info.backend);
+    println!("      Type:    {:?}", info.device_type);
     println!();
 }
 
 /// Print configuration
 pub fn print_config(config: &DemoConfig) {
-    println!("⚙️  Training Configuration:");
-    println!("    ├─ Model:      {}", config.model_name);
-    println!("    ├─ Batch Size: {}", config.batch_size);
-    println!("    ├─ LR:         {:.0e}", config.learning_rate);
-    println!("    ├─ Epochs:     {}", config.num_epochs);
-    println!("    ├─ Seq Length: {}", config.max_seq_len);
-    println!("    ├─ FP16:       {}", if config.use_fp16 { "✅" } else { "❌" });
-    println!("    └─ LoRA:       {} (rank={})", 
-        if config.use_lora { "✅" } else { "❌" },
+    println!("[CONFIG] Training Configuration:");
+    println!("         Model:      {}", config.model_name);
+    println!("         Batch Size: {}", config.batch_size);
+    println!("         LR:         {:.0e}", config.learning_rate);
+    println!("         Epochs:     {}", config.num_epochs);
+    println!("         Seq Length: {}", config.max_seq_len);
+    println!("         FP16:       {}", if config.use_fp16 { "Yes" } else { "No" });
+    println!("         LoRA:       {} (rank={})", 
+        if config.use_lora { "Yes" } else { "No" },
         config.lora_rank
     );
     println!();
@@ -94,9 +88,9 @@ pub fn print_progress(
     let progress = (step as f32 / total_steps as f32 * 100.0) as usize;
     let bar_width = 30;
     let filled = progress * bar_width / 100;
-    let bar: String = "█".repeat(filled) + &"░".repeat(bar_width - filled);
+    let bar: String = "=".repeat(filled) + &"-".repeat(bar_width - filled);
     
-    print!("\r📊 Epoch {}: [{}] {}% │ Loss: {:.4} │ LR: {:.2e} │ {:.0} tok/s",
+    print!("\r[TRAIN] Epoch {}: [{}] {}% | Loss: {:.4} | LR: {:.2e} | {:.0} tok/s",
         epoch, bar, progress, loss, lr, tokens_per_sec
     );
     std::io::Write::flush(&mut std::io::stdout()).ok();
@@ -105,7 +99,7 @@ pub fn print_progress(
 /// Print epoch summary
 pub fn print_epoch_summary(epoch: usize, avg_loss: f32, duration_secs: f32) {
     println!();
-    println!("    ✅ Epoch {} Complete │ Avg Loss: {:.4} │ Time: {:.1}s",
+    println!("        Epoch {} Complete | Avg Loss: {:.4} | Time: {:.1}s",
         epoch, avg_loss, duration_secs
     );
 }
@@ -136,7 +130,7 @@ pub fn run_demo(config: DemoConfig) {
     print_banner();
     
     // Initialize GPU
-    println!("🚀 Initializing GPU...");
+    println!("[INIT] Initializing GPU...");
     let ctx = Arc::new(pollster::block_on(async { WgpuContext::new().await }));
     let _engine = ComputeEngine::new(&ctx);
     print_gpu_info(&ctx);
@@ -144,17 +138,17 @@ pub fn run_demo(config: DemoConfig) {
     print_config(&config);
     
     // Create demo data
-    println!("📚 Loading Training Data...");
+    println!("[DATA] Loading Training Data...");
     let data = create_demo_data();
-    println!("    └─ {} training samples loaded", data.len());
+    println!("       {} training samples loaded", data.len());
     println!();
     
     // Initialize training components
-    println!("🔧 Initializing Training Components...");
+    println!("[INIT] Initializing Training Components...");
     
     // Create GradScaler for FP16
     let scaler: Option<GradScaler> = if config.use_fp16 {
-        println!("    ├─ GradScaler initialized (FP16 training)");
+        println!("       GradScaler initialized (FP16 training)");
         Some(GradScaler::new())
     } else {
         None
@@ -166,16 +160,16 @@ pub fn run_demo(config: DemoConfig) {
         config.learning_rate * 0.01,
         config.num_epochs * data.len() / config.batch_size,
     );
-    println!("    ├─ CosineAnnealingLR scheduler ready");
+    println!("       CosineAnnealingLR scheduler ready");
     
     // Create optimizer
     let lr = scheduler.get_lr();
-    println!("    └─ AdamW optimizer (lr={:.2e})", lr);
+    println!("       AdamW optimizer (lr={:.2e})", lr);
     println!();
     
     // Training loop
-    println!("🏋️ Starting Training...");
-    println!("{}", "─".repeat(70));
+    println!("[TRAIN] Starting Training...");
+    println!("{}", "-".repeat(70));
     
     let total_steps = (data.len() / config.batch_size) * config.num_epochs;
     let mut global_step = 0;
@@ -215,24 +209,24 @@ pub fn run_demo(config: DemoConfig) {
         print_epoch_summary(epoch, avg_loss, epoch_duration);
     }
     
-    println!("{}", "─".repeat(70));
+    println!("{}", "-".repeat(70));
     println!();
     
     // Print final summary
-    println!("🎉 Training Complete!");
+    println!("[DONE] Training Complete!");
     println!();
-    println!("📈 Final Statistics:");
-    println!("    ├─ Total Steps:    {}", global_step);
-    println!("    ├─ Final Loss:     {:.4}", 0.15);
-    println!("    ├─ Final LR:       {:.2e}", scheduler.get_lr());
+    println!("[STATS] Final Statistics:");
+    println!("        Total Steps:    {}", global_step);
+    println!("        Final Loss:     {:.4}", 0.15);
+    println!("        Final LR:       {:.2e}", scheduler.get_lr());
     if config.use_fp16 {
         if let Some(ref s) = scaler {
-            println!("    └─ GradScaler:     scale={:.0}", s.scale_factor());
+            println!("        GradScaler:     scale={:.0}", s.scale_factor());
         }
     }
     println!();
     
-    println!("💾 Model Ready for Inference!");
+    println!("[READY] Model Ready for Inference!");
     println!();
 }
 

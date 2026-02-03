@@ -1,4 +1,4 @@
-# 🦀 Rusty ML Framework
+# Rusty ML Framework
 
 > **GPU-Accelerated Machine Learning in Pure Rust**
 
@@ -9,20 +9,16 @@
 
 Rusty is a high-performance ML framework written entirely in Rust, designed for training and fine-tuning Large Language Models on consumer hardware. It achieves **120+ GFLOPS** on Apple M2 with custom WGSL compute shaders.
 
-<p align="center">
-  <img src="docs/benchmark.png" alt="Benchmark Results" width="600">
-</p>
+## Features
 
-## ✨ Features
+- **GPU Acceleration** - Native Metal/WebGPU backend via wgpu
+- **Flash Attention** - O(N) memory instead of O(N²)
+- **LoRA Fine-tuning** - Train billion-parameter models on 8GB RAM
+- **Mixed Precision** - FP16 training with dynamic loss scaling
+- **HuggingFace Compatible** - Load any LLaMA/Mistral/Phi model
+- **Custom WGSL Kernels** - Hand-optimized compute shaders (1000+ lines)
 
-- 🚀 **GPU Acceleration** - Native Metal/WebGPU backend via wgpu
-- 🧠 **Flash Attention** - O(N) memory instead of O(N²)
-- 🎯 **LoRA Fine-tuning** - Train billion-parameter models on 8GB RAM
-- ⚡ **Mixed Precision** - FP16 training with dynamic loss scaling
-- 📦 **HuggingFace Compatible** - Load any LLaMA/Mistral/Phi model
-- 🔥 **Custom WGSL Kernels** - Hand-optimized compute shaders (1000+ lines)
-
-## 📊 Performance
+## Performance
 
 Tested on Apple M2 (Metal backend):
 
@@ -34,7 +30,7 @@ Tested on Apple M2 (Metal backend):
 | Softmax | 2048×2048 | 850 M elem/s |
 | RMSNorm | 4096×2048 | 920 M elem/s |
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
@@ -50,7 +46,7 @@ cargo build --release
 ### Run Demo
 
 ```bash
-# Beautiful visual demo (great for videos!)
+# Visual demo (great for showcasing)
 cargo run -p rusty-cli --release -- --demo
 ```
 
@@ -58,7 +54,7 @@ cargo run -p rusty-cli --release -- --demo
 
 ```bash
 # GPU performance benchmarks
-TMPDIR=/tmp cargo run -p rusty-benchmarks --release
+cargo run -p rusty-benchmarks --release
 ```
 
 ### Fine-tune a Model
@@ -72,7 +68,7 @@ huggingface-cli download TinyLlama/TinyLlama-1.1B-Chat-v1.0
 cargo run -p rusty-cli --release -- ~/.cache/huggingface/hub/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0/snapshots/*/
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 rusty/
@@ -86,7 +82,7 @@ rusty/
 └── benchmarks/        # Performance benchmarks
 ```
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -105,25 +101,25 @@ rusty/
 │                      rusty-backend                              │
 │    (GPU Compute: wgpu + 1000+ lines of WGSL kernels)            │
 └─────────────────────────────────────────────────────────────────┘
-                              ▼
+                              │
                     ┌─────────────────┐
                     │   Metal/WebGPU  │
                     │   (Apple M1/M2) │
                     └─────────────────┘
 ```
 
-## 🔧 Supported Models
+## Supported Models
 
 | Model Family | Status | Notes |
 |--------------|--------|-------|
-| LLaMA / LLaMA-2 / LLaMA-3 | ✅ | Full support |
-| Mistral / Mixtral | ✅ | Sliding window attention |
-| TinyLlama | ✅ | Great for testing |
-| Phi / Phi-2 / Phi-3 | ✅ | Microsoft models |
-| Qwen / Qwen-2 | ✅ | Alibaba models |
-| Gemma / Gemma-2 | ✅ | Google models |
+| LLaMA / LLaMA-2 / LLaMA-3 | Supported | Full support |
+| Mistral / Mixtral | Supported | Sliding window attention |
+| TinyLlama | Supported | Great for testing |
+| Phi / Phi-2 / Phi-3 | Supported | Microsoft models |
+| Qwen / Qwen-2 | Supported | Alibaba models |
+| Gemma / Gemma-2 | Supported | Google models |
 
-## 📖 Usage Examples
+## Usage Examples
 
 ### Basic Inference
 
@@ -149,7 +145,6 @@ async fn main() {
 use rusty_trainer::{GradScaler, DemoConfig, run_demo};
 
 fn main() {
-    // Run demo with default config
     run_demo(DemoConfig {
         model_name: "TinyLlama-1.1B".to_string(),
         batch_size: 4,
@@ -178,7 +173,7 @@ Then train:
 cargo run -p rusty-cli --release -- /path/to/model ./data/custom.json
 ```
 
-## 🛠️ Development
+## Development
 
 ### Prerequisites
 
@@ -203,13 +198,13 @@ cargo test --workspace
 
 ```bash
 # Full benchmark suite
-TMPDIR=/tmp cargo run -p rusty-benchmarks --release
+cargo run -p rusty-benchmarks --release
 
 # Quick check
 cargo check --workspace
 ```
 
-## 📈 Roadmap
+## Roadmap
 
 - [x] GPU Backend (Metal/WebGPU)
 - [x] Custom WGSL Kernels (MatMul, Softmax, RMSNorm, SiLU)
@@ -223,13 +218,12 @@ cargo check --workspace
 - [ ] Distributed Training
 - [ ] ONNX Export
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) first.
 
 ```bash
-# Fork the repo
-# Create a branch
+# Fork the repo, create a branch
 git checkout -b feature/amazing-feature
 
 # Make changes and test
@@ -242,11 +236,11 @@ git push origin feature/amazing-feature
 # Open a Pull Request
 ```
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [wgpu](https://github.com/gfx-rs/wgpu) - Cross-platform GPU API
 - [safetensors](https://github.com/huggingface/safetensors) - Safe tensor serialization
@@ -254,6 +248,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-<p align="center">
-  <b>Built with 🦀 Rust + ⚡ GPU Power</b>
-</p>
+**Built with Rust + GPU Power**

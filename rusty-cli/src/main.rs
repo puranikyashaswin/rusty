@@ -43,20 +43,24 @@ fn main() {
 }
 
 fn print_usage() {
-    println!("╔════════════════════════════════════════════════════════════════╗");
-    println!("║                    RUSTY ML FRAMEWORK                          ║");
-    println!("║              GPU-Accelerated Training in Rust                  ║");
-    println!("╚════════════════════════════════════════════════════════════════╝\n");
+    println!("======================================================================");
+    println!("                    RUSTY ML FRAMEWORK                                ");
+    println!("              GPU-Accelerated Training in Rust                        ");
+    println!("======================================================================");
+    println!();
     println!("USAGE:");
     println!("  rusty-cli <MODEL_PATH> [DATASET_PATH]");
     println!("  rusty-cli --demo         Run demo mode");
     println!("  rusty-cli --benchmark    Run GPU benchmarks");
-    println!("  rusty-cli --help         Show this help\n");
+    println!("  rusty-cli --help         Show this help");
+    println!();
     println!("EXAMPLES:");
     println!("  # Fine-tune with LoRA on custom data:");
-    println!("  rusty-cli ~/.cache/huggingface/models/TinyLlama-1.1B data/train.json\n");
+    println!("  rusty-cli ~/.cache/huggingface/models/TinyLlama-1.1B data/train.json");
+    println!();
     println!("  # Run demo mode:");
-    println!("  rusty-cli --demo\n");
+    println!("  rusty-cli --demo");
+    println!();
     println!("SUPPORTED MODELS:");
     println!("  - LLaMA / LLaMA-2 / LLaMA-3");
     println!("  - Mistral / Mixtral");
@@ -76,100 +80,108 @@ fn run_benchmark() {
 }
 
 async fn run_finetune(model_path: &str, dataset_path: Option<&str>) {
-    println!("═══════════════════════════════════════════════════════════════");
-    println!("   RUSTY: Universal Model Fine-Tuning");
-    println!("═══════════════════════════════════════════════════════════════\n");
+    println!("======================================================================");
+    println!("   RUSTY: Universal Model Fine-Tuning                                 ");
+    println!("======================================================================");
+    println!();
 
     // Check if model exists
     if !Path::new(model_path).exists() {
-        println!("❌ Model not found at: {}", model_path);
-        println!("   Please provide a valid path to a HuggingFace model directory.");
-        println!("\n   Example paths:");
-        println!("   ~/.cache/huggingface/hub/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0");
-        println!("   ~/.lmstudio/models/lmstudio-community/TinyLlama-1.1B");
+        println!("[ERROR] Model not found at: {}", model_path);
+        println!("        Please provide a valid path to a HuggingFace model directory.");
+        println!();
+        println!("        Example paths:");
+        println!("        ~/.cache/huggingface/hub/models--TinyLlama--TinyLlama-1.1B-Chat-v1.0");
+        println!("        ~/.lmstudio/models/lmstudio-community/TinyLlama-1.1B");
         return;
     }
 
     // 1. Initialize GPU Backend
-    println!("🔧 Initializing Metal GPU backend...");
+    println!("[INIT] Initializing Metal GPU backend...");
     let ctx = Arc::new(WgpuContext::new().await);
     let engine = Arc::new(ComputeEngine::new(&ctx));
-    println!("   ✓ GPU ready: {}", ctx.adapter_info());
+    println!("       GPU ready: {}", ctx.adapter_info());
 
     // 2. Load Tokenizer
-    println!("\n📝 Loading tokenizer...");
+    println!();
+    println!("[LOAD] Loading tokenizer...");
     let tokenizer_path = format!("{}/tokenizer.json", model_path);
     let tokenizer = match Tokenizer::from_file(&tokenizer_path) {
         Ok(t) => {
-            println!("   ✓ Loaded {} tokens", t.vocab.len());
+            println!("       Loaded {} tokens", t.vocab.len());
             t
         }
         Err(e) => {
-            println!("   ⚠️ Tokenizer load failed: {}", e);
-            println!("   Using byte-level fallback tokenizer");
+            println!("       [WARN] Tokenizer load failed: {}", e);
+            println!("       Using byte-level fallback tokenizer");
             create_byte_tokenizer()
         }
     };
 
     // 3. Load Dataset (if provided)
     let samples: Vec<Sample> = if let Some(path) = dataset_path {
-        println!("\n📊 Loading training dataset...");
+        println!();
+        println!("[DATA] Loading training dataset...");
         match fs::read_to_string(path) {
             Ok(content) => {
                 match serde_json::from_str::<Vec<Sample>>(&content) {
                     Ok(s) => {
-                        println!("   ✓ Loaded {} training samples", s.len());
+                        println!("       Loaded {} training samples", s.len());
                         s
                     }
                     Err(e) => {
-                        println!("   ⚠️ Failed to parse dataset: {}", e);
+                        println!("       [WARN] Failed to parse dataset: {}", e);
                         create_default_samples()
                     }
                 }
             }
             Err(_) => {
-                println!("   ⚠️ Dataset file not found, using default samples");
+                println!("       [WARN] Dataset file not found, using default samples");
                 create_default_samples()
             }
         }
     } else {
-        println!("\n📊 No dataset provided, using default samples...");
+        println!();
+        println!("[DATA] No dataset provided, using default samples...");
         create_default_samples()
     };
 
     // 4. Load Model Config
-    println!("\n🧠 Loading model configuration...");
+    println!();
+    println!("[LOAD] Loading model configuration...");
     let config_path = format!("{}/config.json", model_path);
     let config = match ModelLoader::load_config(&config_path) {
         Ok(c) => {
-            println!("   Hidden Size: {}", c.hidden_size);
-            println!("   Layers: {}", c.num_hidden_layers);
-            println!("   Vocab Size: {}", c.vocab_size);
+            println!("       Hidden Size: {}", c.hidden_size);
+            println!("       Layers: {}", c.num_hidden_layers);
+            println!("       Vocab Size: {}", c.vocab_size);
             c
         }
         Err(e) => {
-            println!("   ❌ Failed to load config: {}", e);
+            println!("       [ERROR] Failed to load config: {}", e);
             return;
         }
     };
 
     // 5. Load Weights
-    println!("\n⏳ Loading model weights...");
+    println!();
+    println!("[LOAD] Loading model weights...");
     let weights_path = format!("{}/model.safetensors", model_path);
     let mut weights_ctx = WeightsContext::new();
     if let Err(e) = weights_ctx.load_file(&weights_path) {
-        println!("   ❌ Failed to load weights: {}", e);
-        println!("   Trying consolidated.safetensors...");
+        println!("       [ERROR] Failed to load weights: {}", e);
+        println!("       Trying consolidated.safetensors...");
         let alt_path = format!("{}/consolidated.safetensors", model_path);
         if let Err(e2) = weights_ctx.load_file(&alt_path) {
-            println!("   ❌ Also failed: {}", e2);
+            println!("       [ERROR] Also failed: {}", e2);
             return;
         }
     }
-    println!("   ✓ Weights loaded successfully");
+    println!("       Weights loaded successfully");
 
     // 6. Build Model with LoRA
-    println!("\n🔨 Building model with LoRA adapters...");
+    println!();
+    println!("[BUILD] Building model with LoRA adapters...");
     let lora_config = LoRaConfig {
         rank: 8,
         alpha: 16.0,
@@ -185,20 +197,23 @@ async fn run_finetune(model_path: &str, dataset_path: Option<&str>) {
         .build();
     
     let lora_params = model.lora_params();
-    println!("   ✓ Model built with {} LoRA parameters", lora_params.len());
+    println!("        Model built with {} LoRA parameters", lora_params.len());
 
     // 7. Setup Training
-    println!("\n🎯 Training configuration:");
+    println!();
+    println!("[CONFIG] Training configuration:");
     let learning_rate = 1e-4;
     let epochs = 10;
-    println!("   Learning rate: {}", learning_rate);
-    println!("   Epochs: {}", epochs);
-    println!("   Samples: {}", samples.len());
+    println!("         Learning rate: {}", learning_rate);
+    println!("         Epochs: {}", epochs);
+    println!("         Samples: {}", samples.len());
 
     // 8. Training Loop
-    println!("\n🚀 Starting fine-tuning...\n");
-    println!("   Epoch │ Avg Loss  │ Progress");
-    println!("   ──────┼───────────┼──────────");
+    println!();
+    println!("[TRAIN] Starting fine-tuning...");
+    println!();
+    println!("   Epoch |   Avg Loss  |   Progress");
+    println!("   ------+-------------+------------");
 
     let _optimizer = AdamW::new(engine.clone(), learning_rate as f32);
     
@@ -263,19 +278,22 @@ async fn run_finetune(model_path: &str, dataset_path: Option<&str>) {
         }
         
         let avg_loss = total_loss / samples.len() as f32;
-        let progress = "█".repeat((epoch * 20 / epochs).max(1));
+        let progress = "=".repeat((epoch * 20 / epochs).max(1));
         
         if epoch % 2 == 0 || epoch == epochs - 1 {
-            println!("   {:5} │ {:9.4} │ {}", epoch, avg_loss, progress);
+            println!("   {:5} |   {:9.4} | {}", epoch, avg_loss, progress);
         }
     }
 
-    println!("\n═══════════════════════════════════════════════════════════════");
-    println!("   ✅ Training Complete!");
-    println!("═══════════════════════════════════════════════════════════════");
+    println!();
+    println!("======================================================================");
+    println!("   Training Complete!                                                 ");
+    println!("======================================================================");
 
     // 9. Test Inference
-    println!("\n🧪 Testing inference...\n");
+    println!();
+    println!("[TEST] Testing inference...");
+    println!();
     let sampler = Sampler::default();
     
     let test_prompts = ["Hello!", "What can you do?", "Tell me about yourself"];
@@ -298,11 +316,13 @@ async fn run_finetune(model_path: &str, dataset_path: Option<&str>) {
         
         let response = tokenizer.decode(&generated);
         println!("   Q: \"{}\"", prompt);
-        println!("   A: \"{}\"\n", if response.is_empty() { "(generating...)" } else { &response });
+        println!("   A: \"{}\"", if response.is_empty() { "(generating...)" } else { &response });
+        println!();
     }
 
-    println!("💾 Use --save-lora to export trained adapters");
-    println!("\n🎉 Done!");
+    println!("[SAVE] Use --save-lora to export trained adapters");
+    println!();
+    println!("[DONE] Finished!");
 }
 
 fn create_byte_tokenizer() -> Tokenizer {
