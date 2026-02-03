@@ -7,6 +7,7 @@ members = [
     "rusty-cli",
     "rusty-autograd",
     "rusty-trainer",
+    "rusty-hub",
 ]
 resolver = "2"
 

@@ -1331,6 +1331,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusty-hub"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "rusty-autograd",
+ "rusty-backend",
+ "rusty-graph",
+ "rusty-loader",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rusty-loader"
 version = "0.1.0"
 dependencies = [
