@@ -2,7 +2,6 @@
 //!
 //! This module provides gradient computation through reverse-mode autodiff.
 
-use std::sync::Arc;
 use std::sync::RwLock;
 use wgpu::{Buffer, BufferUsages};
 

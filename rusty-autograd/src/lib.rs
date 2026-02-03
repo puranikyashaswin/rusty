@@ -297,7 +297,7 @@ where
         fn backward(&self, inputs: &[Tensor], outputs: &[Tensor], grad_outputs: &[UnifiedTensor], engine: &ComputeEngine) -> Vec<UnifiedTensor> {
             // Run backward on the recomputed outputs
             // Each output should have been created with autograd, so we can backprop through it
-            let mut input_grads: Vec<UnifiedTensor> = vec![];
+            let input_grads: Vec<UnifiedTensor> = vec![];
             for (i, (output, grad)) in outputs.iter().zip(grad_outputs.iter()).enumerate() {
                 *output.grad.borrow_mut() = Some(grad.clone());
             }

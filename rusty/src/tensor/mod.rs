@@ -7,4 +7,3 @@ mod ops;
 mod autograd;
 
 pub use core::Tensor;
-pub(crate) use autograd::{AutogradNode, GradCell};

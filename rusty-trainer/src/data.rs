@@ -3,7 +3,6 @@
 //! Provides Dataset trait and DataLoader for efficient training data loading.
 
 use std::sync::Arc;
-use rusty_backend::{WgpuContext, UnifiedTensor};
 
 /// Trait for datasets that provide training samples
 pub trait Dataset: Send + Sync {

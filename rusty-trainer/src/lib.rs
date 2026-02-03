@@ -5,8 +5,11 @@ use std::sync::Arc;
 
 pub mod checkpoint;
 pub mod data;
+pub mod scaler;
 
 pub use data::{Dataset, TextDataset, DataLoader, Batch};
+pub use scaler::{GradScaler, GradScalerStats};
+
 
 pub struct Trainer {
     pub model: LlamaModel,
