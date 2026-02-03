@@ -21,77 +21,74 @@
 | **Full Autograd** | Reverse-mode automatic differentiation with gradient tracking |
 | **LLM Ready** | Llama architecture, RoPE, Multi-Head Attention, LoRA |
 | **Fused Kernels** | SiLU-Gate, RMSNorm+Residual - 2x memory bandwidth savings |
+| **Mixed Precision** | FP16 tensors, cast kernels, dynamic loss scaling |
+| **Gradient Checkpointing** | Memory-efficient training via activation recomputation |
 | **Quantization** | Int8/Int4 with on-GPU dequantization |
+| **Data Pipeline** | Dataset trait, DataLoader with batching/shuffling |
 | **Safetensors** | Native HuggingFace .safetensors loading |
-| **Training** | AdamW, gradient clipping, LR schedulers, checkpointing |
 
 ## Architecture
 
 ```
 rusty/                      # Workspace root
-├── rusty-backend/          # GPU compute engine
-│   ├── kernels.wgsl        # 25+ WGSL compute shaders
-│   └── lib.rs              # ComputeEngine, UnifiedTensor
-├── rusty-autograd/         # Automatic differentiation
-│   └── lib.rs              # Tensor, AutogradNodes, AdamW, LRSchedulers
-├── rusty-graph/            # Neural network graphs
-│   └── lib.rs              # LlamaBlock, MLP, Attention, RoPE
-├── rusty-loader/           # Model loading
-│   └── lib.rs              # Safetensors parser, quantization
-├── rusty-trainer/          # Training utilities
-│   └── checkpoint.rs       # Save/load checkpoints
+├── rusty-backend/          # GPU compute engine (25+ WGSL shaders)
+├── rusty-autograd/         # Automatic differentiation, optimizers
+├── rusty-graph/            # LlamaBlock, MLP, Attention, RoPE
+├── rusty-loader/           # Safetensors parser, quantization
+├── rusty-trainer/          # Training: DataLoader, GradScaler, Checkpoints
 └── rusty-cli/              # Command-line interface
-    └── main.rs             # Text generation CLI
 ```
 
 ## Quick Start
 
-### LLM Inference (Llama-style)
+### Training with Mixed Precision
 ```rust
-use rusty_backend::{WgpuContext, ComputeEngine};
-use rusty_graph::LlamaBlock;
-use rusty_loader::WeightsContext;
+use rusty_autograd::{Tensor, AdamW};
+use rusty_trainer::{GradScaler, DataLoader, TextDataset};
+use rusty_backend::DType;
 
-#[tokio::main]
-async fn main() {
-    // Initialize GPU
-    let ctx = WgpuContext::new().await;
-    let engine = ComputeEngine::new(&ctx);
+// Create FP16 tensors for memory efficiency
+let hidden = UnifiedTensor::empty_fp16(&ctx, &[batch, seq, dim]);
+
+// Setup dynamic loss scaling for stable FP16 training
+let mut scaler = GradScaler::new();
+
+// Training loop with gradient scaling
+for batch in &mut loader {
+    let logits = model.forward(&input, &engine);
+    let loss = Tensor::cross_entropy_loss(&logits, target, &engine);
     
-    // Load model
-    let weights = WeightsContext::from_file("model.safetensors")?;
-    let block = LlamaBlock::new(&ctx, &weights, &engine, 0);
+    scaler.scale_loss(&loss.data, &ctx, &engine);  // Scale before backward
+    loss.backward(&engine);
     
-    // Forward pass
-    let output = block.forward(&hidden_states, &engine);
+    if scaler.unscale_and_check(&gradients, &ctx, &engine) {
+        optimizer.step(&params);  // Only if no overflow
+    }
+    scaler.update();  // Adjust scale automatically
 }
 ```
 
-### Training with Autograd
+### Gradient Checkpointing (Memory Efficient)
 ```rust
-use rusty_autograd::{Tensor, AdamW, CosineAnnealingLR, LRScheduler};
+use rusty_autograd::checkpoint_single;
 
-// Create tensors with gradient tracking
-let logits = model.forward(&input, &engine);
-let loss = Tensor::cross_entropy_loss(&logits, target_token, &engine);
-
-// Backward pass
-loss.backward(&engine);
-
-// Optimizer step with LR scheduler
-let mut scheduler = CosineAnnealingLR::new(1e-4, 1e-6, 1000);
-optimizer.lr = scheduler.get_lr();
-optimizer.step(&params);
-scheduler.step();
+// Recompute activations during backward to save memory
+let output = checkpoint_single(hidden, |x, eng| {
+    transformer_block.forward(x, eng)
+}, &engine);
 ```
 
-### Fused Operations (2x Faster)
+### DataLoader
 ```rust
-// Fused SiLU-Gate for Llama MLP (single kernel, 2x memory savings)
-let mlp_out = Tensor::silu_gate_fused(&up, &gate, &engine);
+use rusty_trainer::{TextDataset, DataLoader};
 
-// Gradient accumulation for micro-batching
-engine.gradient_accumulate(&ctx, &accum_grad, &new_grad);
+let dataset = TextDataset::from_sequences(token_sequences);
+let mut loader = DataLoader::new(dataset, batch_size, shuffle);
+
+for batch in &mut loader {
+    // batch.input_ids, batch.target_ids
+}
+loader.reset();  // Shuffle for new epoch
 ```
 
 ## WGSL Compute Kernels
@@ -104,45 +101,31 @@ engine.gradient_accumulate(&ctx, &accum_grad, &new_grad);
 | **Attention** | RoPE, Softmax, MaskedFill |
 | **Training** | CrossEntropy (fwd+bwd), MSE, GradClip |
 | **Optimization** | AdamW, GradAccum, GradScale |
-| **Quantization** | Int8→FP32 dequant, Affine dequant |
+| **Quantization** | Int8→FP32, FP32↔FP16 cast |
 | **Fused** | SiLU-Gate (fwd+bwd), RMSNorm+Residual |
 
-## Training Capabilities
+## Training Features
 
-### Loss Functions
-- **Cross-Entropy Loss** - With numerically stable log-softmax
-- **MSE Loss** - Mean squared error
-
-### Optimizers
-- **AdamW** - Adam with decoupled weight decay
-
-### LR Schedulers
-- **CosineAnnealingLR** - Cosine decay to min_lr
-- **WarmupCosineScheduler** - Linear warmup + cosine decay
-
-### Memory Optimization
-- **Gradient Accumulation** - Micro-batching for large models
-- **Fused Kernels** - Reduced memory bandwidth
-- **Safetensors** - Zero-copy weight loading
+| Feature | API |
+|---------|-----|
+| **Loss Scaling** | `GradScaler::new()`, `scale_loss()`, `unscale_and_check()` |
+| **Checkpointing** | `checkpoint_single()` for memory-efficient backprop |
+| **LR Schedulers** | `CosineAnnealingLR`, `WarmupCosineScheduler` |
+| **Data Loading** | `DataLoader`, `Dataset` trait, `TextDataset` |
+| **Model Saving** | `save_lora_checkpoint()`, `load_lora_checkpoint()` |
 
 ## Installation
 
 ```bash
-# Clone the repo
 git clone https://github.com/puranikyashaswin/rusty.git
 cd rusty
-
-# Build all crates
 cargo build --release
-
-# Run CLI
 cargo run --release -p rusty-cli -- --model path/to/model.safetensors
 ```
 
 ### Requirements
 - Rust 1.75+
 - GPU with Metal (macOS) or Vulkan support
-- macOS 12+ / Linux / Windows
 
 ## Roadmap
 
@@ -151,19 +134,10 @@ cargo run --release -p rusty-cli -- --model path/to/model.safetensors
 - [x] Llama architecture implementation
 - [x] Full autograd + training support
 - [x] Fused kernels + memory optimization
-- [ ] Gradient checkpointing
-- [ ] Mixed precision (FP16/BF16)
+- [x] Gradient checkpointing
+- [x] Mixed precision (FP16) + dynamic loss scaling
+- [x] Data pipeline (DataLoader, Dataset)
 - [ ] Distributed training
-
-## Contributing
-
-Contributions welcome! This project aims to be a viable Rust alternative to PyTorch.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing`)
-5. Open a Pull Request
 
 ## License
 
