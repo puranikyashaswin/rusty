@@ -2,9 +2,9 @@
 //!
 //! Token embedding lookup table.
 
+use super::Module;
 use crate::tensor::Tensor;
 use crate::Device;
-use super::Module;
 
 /// Embedding layer for token lookup.
 ///
@@ -25,7 +25,7 @@ impl Embedding {
         let weight = Tensor::randn(&[vocab_size, embedding_dim], device)
             .mul_scalar(0.02)
             .requires_grad_();
-        
+
         Self {
             weight,
             vocab_size,
@@ -37,14 +37,18 @@ impl Embedding {
     pub fn from_weights(weight: Tensor) -> Self {
         let vocab_size = weight.shape[0];
         let embedding_dim = weight.shape[1];
-        Self { weight, vocab_size, embedding_dim }
+        Self {
+            weight,
+            vocab_size,
+            embedding_dim,
+        }
     }
 
     /// Lookup embeddings for given token IDs.
     pub fn forward_indices(&self, token_ids: &[u32]) -> Tensor {
         let weight_data = self.weight.to_vec();
         let seq_len = token_ids.len();
-        
+
         // Gather embeddings
         let mut result = Vec::with_capacity(seq_len * self.embedding_dim);
         for &id in token_ids {
@@ -52,7 +56,7 @@ impl Embedding {
             let end = start + self.embedding_dim;
             result.extend_from_slice(&weight_data[start..end]);
         }
-        
+
         Tensor::from_data(&result, &[seq_len, self.embedding_dim], &self.weight.device)
     }
 }

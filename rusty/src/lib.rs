@@ -41,12 +41,12 @@
 #![warn(missing_docs)]
 
 pub mod backend;
-pub mod tensor;
+pub mod data;
+pub mod functional;
 pub mod nn;
 pub mod optim;
-pub mod functional;
-pub mod data;
 pub mod serialize;
+pub mod tensor;
 
 mod device;
 
@@ -54,10 +54,10 @@ pub use device::Device;
 
 /// Prelude module - import everything you need with `use rusty::prelude::*`
 pub mod prelude {
-    pub use crate::Device;
-    pub use crate::tensor::Tensor;
+    pub use crate::data::{DataLoader, Dataset};
+    pub use crate::functional as F;
     pub use crate::nn;
     pub use crate::optim;
-    pub use crate::functional as F;
-    pub use crate::data::{Dataset, DataLoader};
+    pub use crate::tensor::Tensor;
+    pub use crate::Device;
 }

@@ -2,10 +2,10 @@
 //!
 //! Loads and uses the tokenizer.json from the model directory.
 
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use serde::Deserialize;
 
 #[derive(Debug, Clone)]
 pub struct Tokenizer {
@@ -31,20 +31,25 @@ impl Tokenizer {
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
         let content = fs::read_to_string(path)
             .map_err(|e| format!("Failed to read tokenizer.json: {}", e))?;
-        
+
         let parsed: TokenizerJson = serde_json::from_str(&content)
             .map_err(|e| format!("Failed to parse tokenizer.json: {}", e))?;
-        
+
         let vocab = parsed.model.vocab;
-        let id_to_token: HashMap<u32, String> = vocab.iter()
-            .map(|(k, v)| (*v, k.clone()))
-            .collect();
-        
+        let id_to_token: HashMap<u32, String> =
+            vocab.iter().map(|(k, v)| (*v, k.clone())).collect();
+
         // Find special tokens
-        let bos_token_id = *vocab.get("<|im_start|>").or_else(|| vocab.get("<s>")).unwrap_or(&1);
-        let eos_token_id = *vocab.get("<|im_end|>").or_else(|| vocab.get("</s>")).unwrap_or(&2);
+        let bos_token_id = *vocab
+            .get("<|im_start|>")
+            .or_else(|| vocab.get("<s>"))
+            .unwrap_or(&1);
+        let eos_token_id = *vocab
+            .get("<|im_end|>")
+            .or_else(|| vocab.get("</s>"))
+            .unwrap_or(&2);
         let pad_token_id = *vocab.get("<pad>").unwrap_or(&0);
-        
+
         Ok(Self {
             vocab,
             id_to_token,
@@ -57,7 +62,7 @@ impl Tokenizer {
     /// Encode text to token IDs (simple whitespace + subword split)
     pub fn encode(&self, text: &str) -> Vec<u32> {
         let mut tokens = vec![self.bos_token_id];
-        
+
         // Simple character/byte fallback encoding
         // Real BPE would be more complex, but this works for basic testing
         for word in text.split_whitespace() {
@@ -82,7 +87,7 @@ impl Tokenizer {
                 }
             }
         }
-        
+
         tokens
     }
 
@@ -111,17 +116,17 @@ impl Tokenizer {
     /// Encode with chat template format
     pub fn encode_chat(&self, system: Option<&str>, user: &str) -> Vec<u32> {
         let mut prompt = String::new();
-        
+
         if let Some(sys) = system {
             prompt.push_str("<|im_start|>system\n");
             prompt.push_str(sys);
             prompt.push_str("<|im_end|>\n");
         }
-        
+
         prompt.push_str("<|im_start|>user\n");
         prompt.push_str(user);
         prompt.push_str("<|im_end|>\n<|im_start|>assistant\n");
-        
+
         self.encode(&prompt)
     }
 }
@@ -134,7 +139,10 @@ pub struct Sampler {
 
 impl Default for Sampler {
     fn default() -> Self {
-        Self { temperature: 0.7, top_p: 0.9 }
+        Self {
+            temperature: 0.7,
+            top_p: 0.9,
+        }
     }
 }
 
@@ -142,7 +150,8 @@ impl Sampler {
     pub fn sample(&self, logits: &[f32]) -> u32 {
         if self.temperature <= 0.0 {
             // Greedy
-            return logits.iter()
+            return logits
+                .iter()
                 .enumerate()
                 .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
                 .map(|(i, _)| i as u32)
@@ -151,16 +160,19 @@ impl Sampler {
 
         // Temperature scaling
         let scaled: Vec<f32> = logits.iter().map(|x| x / self.temperature).collect();
-        
+
         // Softmax
         let max_val = scaled.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
         let exp_sum: f32 = scaled.iter().map(|x| (x - max_val).exp()).sum();
-        let probs: Vec<f32> = scaled.iter().map(|x| (x - max_val).exp() / exp_sum).collect();
-        
+        let probs: Vec<f32> = scaled
+            .iter()
+            .map(|x| (x - max_val).exp() / exp_sum)
+            .collect();
+
         // Top-p sampling
         let mut sorted_indices: Vec<usize> = (0..probs.len()).collect();
         sorted_indices.sort_by(|&a, &b| probs[b].partial_cmp(&probs[a]).unwrap());
-        
+
         let mut cumsum = 0.0;
         let mut nucleus_indices = Vec::new();
         for &idx in &sorted_indices {
@@ -170,11 +182,14 @@ impl Sampler {
                 break;
             }
         }
-        
+
         // Renormalize
         let nucleus_sum: f32 = nucleus_indices.iter().map(|&i| probs[i]).sum();
-        let normalized: Vec<f32> = nucleus_indices.iter().map(|&i| probs[i] / nucleus_sum).collect();
-        
+        let normalized: Vec<f32> = nucleus_indices
+            .iter()
+            .map(|&i| probs[i] / nucleus_sum)
+            .collect();
+
         // Sample
         let r: f32 = rand::random();
         let mut cumsum = 0.0;
@@ -184,7 +199,7 @@ impl Sampler {
                 return nucleus_indices[i] as u32;
             }
         }
-        
+
         nucleus_indices[0] as u32
     }
 }

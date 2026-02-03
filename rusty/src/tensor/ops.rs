@@ -3,11 +3,11 @@
 //! Math operations on tensors with automatic differentiation.
 
 use std::sync::Arc;
-use wgpu::BufferUsages;
 use wgpu::util::DeviceExt;
+use wgpu::BufferUsages;
 
-use super::Tensor;
 use super::autograd::*;
+use super::Tensor;
 use crate::backend::ComputeEngine;
 
 impl Tensor {
@@ -18,7 +18,7 @@ impl Tensor {
     /// Element-wise addition: self + other
     pub fn add(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shapes must match for add");
-        
+
         let device = &self.device;
         let engine = device.engine();
         let size = self.numel();
@@ -31,13 +31,27 @@ impl Tensor {
         });
 
         let pipeline = engine.get_pipeline("add").unwrap();
-        let bind_group = engine.create_binary_bind_group(&device.device, pipeline, &self.buffer, &other.buffer, &out_buffer);
-        engine.dispatch(&device.device, &device.queue, "add", &bind_group, 
-            (ComputeEngine::workgroups_1d(size as u32), 1, 1));
+        let bind_group = engine.create_binary_bind_group(
+            &device.device,
+            pipeline,
+            &self.buffer,
+            &other.buffer,
+            &out_buffer,
+        );
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "add",
+            &bind_group,
+            (ComputeEngine::workgroups_1d(size as u32), 1, 1),
+        );
 
         let requires_grad = self.requires_grad || other.requires_grad;
         let creator: Option<Arc<dyn AutogradNode>> = if requires_grad {
-            Some(Arc::new(AddNode { a: self.clone(), b: other.clone() }))
+            Some(Arc::new(AddNode {
+                a: self.clone(),
+                b: other.clone(),
+            }))
         } else {
             None
         };
@@ -55,7 +69,7 @@ impl Tensor {
     /// Element-wise subtraction: self - other
     pub fn sub(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shapes must match for sub");
-        
+
         let device = &self.device;
         let engine = device.engine();
         let size = self.numel();
@@ -68,13 +82,27 @@ impl Tensor {
         });
 
         let pipeline = engine.get_pipeline("sub").unwrap();
-        let bind_group = engine.create_binary_bind_group(&device.device, pipeline, &self.buffer, &other.buffer, &out_buffer);
-        engine.dispatch(&device.device, &device.queue, "sub", &bind_group, 
-            (ComputeEngine::workgroups_1d(size as u32), 1, 1));
+        let bind_group = engine.create_binary_bind_group(
+            &device.device,
+            pipeline,
+            &self.buffer,
+            &other.buffer,
+            &out_buffer,
+        );
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "sub",
+            &bind_group,
+            (ComputeEngine::workgroups_1d(size as u32), 1, 1),
+        );
 
         let requires_grad = self.requires_grad || other.requires_grad;
         let creator: Option<Arc<dyn AutogradNode>> = if requires_grad {
-            Some(Arc::new(SubNode { a: self.clone(), b: other.clone() }))
+            Some(Arc::new(SubNode {
+                a: self.clone(),
+                b: other.clone(),
+            }))
         } else {
             None
         };
@@ -92,7 +120,7 @@ impl Tensor {
     /// Element-wise multiplication: self * other
     pub fn mul(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.shape, other.shape, "Shapes must match for mul");
-        
+
         let device = &self.device;
         let engine = device.engine();
         let size = self.numel();
@@ -105,13 +133,27 @@ impl Tensor {
         });
 
         let pipeline = engine.get_pipeline("mul").unwrap();
-        let bind_group = engine.create_binary_bind_group(&device.device, pipeline, &self.buffer, &other.buffer, &out_buffer);
-        engine.dispatch(&device.device, &device.queue, "mul", &bind_group, 
-            (ComputeEngine::workgroups_1d(size as u32), 1, 1));
+        let bind_group = engine.create_binary_bind_group(
+            &device.device,
+            pipeline,
+            &self.buffer,
+            &other.buffer,
+            &out_buffer,
+        );
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "mul",
+            &bind_group,
+            (ComputeEngine::workgroups_1d(size as u32), 1, 1),
+        );
 
         let requires_grad = self.requires_grad || other.requires_grad;
         let creator: Option<Arc<dyn AutogradNode>> = if requires_grad {
-            Some(Arc::new(MulNode { a: self.clone(), b: other.clone() }))
+            Some(Arc::new(MulNode {
+                a: self.clone(),
+                b: other.clone(),
+            }))
         } else {
             None
         };
@@ -131,7 +173,10 @@ impl Tensor {
     pub fn matmul(&self, other: &Tensor) -> Tensor {
         assert_eq!(self.ndim(), 2, "matmul requires 2D tensors");
         assert_eq!(other.ndim(), 2, "matmul requires 2D tensors");
-        assert_eq!(self.shape[1], other.shape[0], "Inner dimensions must match for matmul");
+        assert_eq!(
+            self.shape[1], other.shape[0],
+            "Inner dimensions must match for matmul"
+        );
 
         let m = self.shape[0];
         let k = self.shape[1];
@@ -148,20 +193,38 @@ impl Tensor {
         });
 
         // Create params buffer [M, K, N, padding]
-        let params = device.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("MatMul Params"),
-            contents: bytemuck::cast_slice(&[m as u32, k as u32, n as u32, 0u32]),
-            usage: BufferUsages::UNIFORM,
-        });
+        let params = device
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("MatMul Params"),
+                contents: bytemuck::cast_slice(&[m as u32, k as u32, n as u32, 0u32]),
+                usage: BufferUsages::UNIFORM,
+            });
 
         let pipeline = engine.get_pipeline("matmul").unwrap();
-        let bind_group = engine.create_matmul_bind_group(&device.device, pipeline, &self.buffer, &other.buffer, &out_buffer, &params);
+        let bind_group = engine.create_matmul_bind_group(
+            &device.device,
+            pipeline,
+            &self.buffer,
+            &other.buffer,
+            &out_buffer,
+            &params,
+        );
         let (wx, wy) = ComputeEngine::workgroups_2d(m as u32, n as u32);
-        engine.dispatch(&device.device, &device.queue, "matmul", &bind_group, (wx, wy, 1));
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "matmul",
+            &bind_group,
+            (wx, wy, 1),
+        );
 
         let requires_grad = self.requires_grad || other.requires_grad;
         let creator: Option<Arc<dyn AutogradNode>> = if requires_grad {
-            Some(Arc::new(MatMulNode { a: self.clone(), b: other.clone() }))
+            Some(Arc::new(MatMulNode {
+                a: self.clone(),
+                b: other.clone(),
+            }))
         } else {
             None
         };
@@ -194,12 +257,20 @@ impl Tensor {
         });
 
         let pipeline = engine.get_pipeline("relu").unwrap();
-        let bind_group = engine.create_unary_bind_group(&device.device, pipeline, &self.buffer, &out_buffer);
-        engine.dispatch(&device.device, &device.queue, "relu", &bind_group, 
-            (ComputeEngine::workgroups_1d(size as u32), 1, 1));
+        let bind_group =
+            engine.create_unary_bind_group(&device.device, pipeline, &self.buffer, &out_buffer);
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "relu",
+            &bind_group,
+            (ComputeEngine::workgroups_1d(size as u32), 1, 1),
+        );
 
         let creator: Option<Arc<dyn AutogradNode>> = if self.requires_grad {
-            Some(Arc::new(ReLUNode { input: self.clone() }))
+            Some(Arc::new(ReLUNode {
+                input: self.clone(),
+            }))
         } else {
             None
         };
@@ -228,12 +299,20 @@ impl Tensor {
         });
 
         let pipeline = engine.get_pipeline("silu").unwrap();
-        let bind_group = engine.create_unary_bind_group(&device.device, pipeline, &self.buffer, &out_buffer);
-        engine.dispatch(&device.device, &device.queue, "silu", &bind_group, 
-            (ComputeEngine::workgroups_1d(size as u32), 1, 1));
+        let bind_group =
+            engine.create_unary_bind_group(&device.device, pipeline, &self.buffer, &out_buffer);
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "silu",
+            &bind_group,
+            (ComputeEngine::workgroups_1d(size as u32), 1, 1),
+        );
 
         let creator: Option<Arc<dyn AutogradNode>> = if self.requires_grad {
-            Some(Arc::new(SiLUNode { input: self.clone() }))
+            Some(Arc::new(SiLUNode {
+                input: self.clone(),
+            }))
         } else {
             None
         };
@@ -262,12 +341,20 @@ impl Tensor {
         });
 
         let pipeline = engine.get_pipeline("gelu").unwrap();
-        let bind_group = engine.create_unary_bind_group(&device.device, pipeline, &self.buffer, &out_buffer);
-        engine.dispatch(&device.device, &device.queue, "gelu", &bind_group, 
-            (ComputeEngine::workgroups_1d(size as u32), 1, 1));
+        let bind_group =
+            engine.create_unary_bind_group(&device.device, pipeline, &self.buffer, &out_buffer);
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "gelu",
+            &bind_group,
+            (ComputeEngine::workgroups_1d(size as u32), 1, 1),
+        );
 
         let creator: Option<Arc<dyn AutogradNode>> = if self.requires_grad {
-            Some(Arc::new(GELUNode { input: self.clone() }))
+            Some(Arc::new(GELUNode {
+                input: self.clone(),
+            }))
         } else {
             None
         };
@@ -296,9 +383,15 @@ impl Tensor {
         });
 
         let pipeline = engine.get_pipeline("sigmoid").unwrap();
-        let bind_group = engine.create_unary_bind_group(&device.device, pipeline, &self.buffer, &out_buffer);
-        engine.dispatch(&device.device, &device.queue, "sigmoid", &bind_group, 
-            (ComputeEngine::workgroups_1d(size as u32), 1, 1));
+        let bind_group =
+            engine.create_unary_bind_group(&device.device, pipeline, &self.buffer, &out_buffer);
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "sigmoid",
+            &bind_group,
+            (ComputeEngine::workgroups_1d(size as u32), 1, 1),
+        );
 
         Tensor {
             buffer: Arc::new(out_buffer),
@@ -324,9 +417,15 @@ impl Tensor {
         });
 
         let pipeline = engine.get_pipeline("tanh_act").unwrap();
-        let bind_group = engine.create_unary_bind_group(&device.device, pipeline, &self.buffer, &out_buffer);
-        engine.dispatch(&device.device, &device.queue, "tanh_act", &bind_group, 
-            (ComputeEngine::workgroups_1d(size as u32), 1, 1));
+        let bind_group =
+            engine.create_unary_bind_group(&device.device, pipeline, &self.buffer, &out_buffer);
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "tanh_act",
+            &bind_group,
+            (ComputeEngine::workgroups_1d(size as u32), 1, 1),
+        );
 
         Tensor {
             buffer: Arc::new(out_buffer),
@@ -351,11 +450,13 @@ impl Tensor {
             mapped_at_creation: false,
         });
 
-        let size_buffer = device.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Softmax Size"),
-            contents: bytemuck::cast_slice(&[size as u32]),
-            usage: BufferUsages::UNIFORM,
-        });
+        let size_buffer = device
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Softmax Size"),
+                contents: bytemuck::cast_slice(&[size as u32]),
+                usage: BufferUsages::UNIFORM,
+            });
 
         let pipeline = engine.get_pipeline("softmax").unwrap();
         let layout = pipeline.get_bind_group_layout(0);
@@ -363,12 +464,27 @@ impl Tensor {
             label: None,
             layout: &layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: out_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: size_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: out_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: size_buffer.as_entire_binding(),
+                },
             ],
         });
-        engine.dispatch(&device.device, &device.queue, "softmax", &bind_group, (1, 1, 1));
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "softmax",
+            &bind_group,
+            (1, 1, 1),
+        );
 
         Tensor {
             buffer: Arc::new(out_buffer),
@@ -397,11 +513,13 @@ impl Tensor {
             mapped_at_creation: false,
         });
 
-        let scalar_buffer = device.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Scalar"),
-            contents: bytemuck::cast_slice(&[scalar]),
-            usage: BufferUsages::UNIFORM,
-        });
+        let scalar_buffer = device
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Scalar"),
+                contents: bytemuck::cast_slice(&[scalar]),
+                usage: BufferUsages::UNIFORM,
+            });
 
         let pipeline = engine.get_pipeline("add_scalar").unwrap();
         let layout = pipeline.get_bind_group_layout(0);
@@ -409,13 +527,27 @@ impl Tensor {
             label: None,
             layout: &layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: out_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: scalar_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: out_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: scalar_buffer.as_entire_binding(),
+                },
             ],
         });
-        engine.dispatch(&device.device, &device.queue, "add_scalar", &bind_group, 
-            (ComputeEngine::workgroups_1d(size as u32), 1, 1));
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "add_scalar",
+            &bind_group,
+            (ComputeEngine::workgroups_1d(size as u32), 1, 1),
+        );
 
         Tensor {
             buffer: Arc::new(out_buffer),
@@ -440,11 +572,13 @@ impl Tensor {
             mapped_at_creation: false,
         });
 
-        let scalar_buffer = device.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Scalar"),
-            contents: bytemuck::cast_slice(&[scalar]),
-            usage: BufferUsages::UNIFORM,
-        });
+        let scalar_buffer = device
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Scalar"),
+                contents: bytemuck::cast_slice(&[scalar]),
+                usage: BufferUsages::UNIFORM,
+            });
 
         let pipeline = engine.get_pipeline("mul_scalar").unwrap();
         let layout = pipeline.get_bind_group_layout(0);
@@ -452,13 +586,27 @@ impl Tensor {
             label: None,
             layout: &layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: out_buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: scalar_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: out_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: scalar_buffer.as_entire_binding(),
+                },
             ],
         });
-        engine.dispatch(&device.device, &device.queue, "mul_scalar", &bind_group, 
-            (ComputeEngine::workgroups_1d(size as u32), 1, 1));
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "mul_scalar",
+            &bind_group,
+            (ComputeEngine::workgroups_1d(size as u32), 1, 1),
+        );
 
         Tensor {
             buffer: Arc::new(out_buffer),

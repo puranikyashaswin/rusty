@@ -1,7 +1,7 @@
-use rusty_backend::{UnifiedTensor, WgpuContext, ComputeEngine, AdamParams};
-use std::sync::Arc;
+use rusty_backend::{AdamParams, ComputeEngine, UnifiedTensor, WgpuContext};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub trait AutogradNode {
     fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor>;
@@ -19,8 +19,8 @@ pub struct Tensor {
 impl std::fmt::Debug for Tensor {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("Tensor")
-         .field("shape", &self.data.shape)
-         .finish()
+            .field("shape", &self.data.shape)
+            .finish()
     }
 }
 
@@ -34,7 +34,11 @@ impl Tensor {
         }
     }
 
-    pub fn with_creator(ctx: Arc<WgpuContext>, data: UnifiedTensor, creator: Arc<dyn AutogradNode>) -> Tensor {
+    pub fn with_creator(
+        ctx: Arc<WgpuContext>,
+        data: UnifiedTensor,
+        creator: Arc<dyn AutogradNode>,
+    ) -> Tensor {
         Tensor {
             data: Arc::new(data),
             grad: Arc::new(RefCell::new(None)),
@@ -47,9 +51,15 @@ impl Tensor {
         let mut sorted_tensors = Vec::new();
         let mut visited = std::collections::HashSet::new();
 
-        fn build_topo(tensor: &Tensor, sorted: &mut Vec<Tensor>, visited: &mut std::collections::HashSet<*const ()>) {
+        fn build_topo(
+            tensor: &Tensor,
+            sorted: &mut Vec<Tensor>,
+            visited: &mut std::collections::HashSet<*const ()>,
+        ) {
             let ptr = Arc::as_ptr(&tensor.data) as *const ();
-            if visited.contains(&ptr) { return; }
+            if visited.contains(&ptr) {
+                return;
+            }
             visited.insert(ptr);
 
             if let Some(creator) = &tensor.creator {
@@ -61,7 +71,7 @@ impl Tensor {
         }
 
         build_topo(self, &mut sorted_tensors, &mut visited);
-        
+
         // Initial gradient = 1.0 if not already set
         if self.grad.borrow().is_none() {
             let shape = &self.data.shape;
@@ -101,15 +111,21 @@ impl Tensor {
     pub fn zero_grad(&self) {
         *self.grad.borrow_mut() = None;
     }
-    
+
     // Recursive zero_grad for the whole graph
     pub fn zero_grad_graph(&self) {
         let mut sorted_tensors = Vec::new();
         let mut visited = std::collections::HashSet::new();
 
-        fn build_topo(tensor: &Tensor, sorted: &mut Vec<Tensor>, visited: &mut std::collections::HashSet<*const ()>) {
+        fn build_topo(
+            tensor: &Tensor,
+            sorted: &mut Vec<Tensor>,
+            visited: &mut std::collections::HashSet<*const ()>,
+        ) {
             let ptr = Arc::as_ptr(&tensor.data) as *const ();
-            if visited.contains(&ptr) { return; }
+            if visited.contains(&ptr) {
+                return;
+            }
             visited.insert(ptr);
             if let Some(creator) = &tensor.creator {
                 for input in creator.inputs() {
@@ -125,9 +141,14 @@ impl Tensor {
     }
 }
 
-pub struct MatMulNode { pub a: Tensor, pub b: Tensor }
+pub struct MatMulNode {
+    pub a: Tensor,
+    pub b: Tensor,
+}
 impl AutogradNode for MatMulNode {
-    fn inputs(&self) -> Vec<Tensor> { vec![self.a.clone(), self.b.clone()] }
+    fn inputs(&self) -> Vec<Tensor> {
+        vec![self.a.clone(), self.b.clone()]
+    }
     fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
         let grad_a = UnifiedTensor::empty(&self.a.ctx, &self.a.data.shape);
         engine.matmul_bt(&self.a.ctx, grad, &self.b.data, &grad_a);
@@ -137,9 +158,14 @@ impl AutogradNode for MatMulNode {
     }
 }
 
-pub struct AddNode { pub a: Tensor, pub b: Tensor }
+pub struct AddNode {
+    pub a: Tensor,
+    pub b: Tensor,
+}
 impl AutogradNode for AddNode {
-    fn inputs(&self) -> Vec<Tensor> { vec![self.a.clone(), self.b.clone()] }
+    fn inputs(&self) -> Vec<Tensor> {
+        vec![self.a.clone(), self.b.clone()]
+    }
     fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
         let grad_a = UnifiedTensor::empty(&self.a.ctx, &self.a.data.shape);
         let grad_b = UnifiedTensor::empty(&self.b.ctx, &self.b.data.shape);
@@ -148,20 +174,37 @@ impl AutogradNode for AddNode {
     }
 }
 
-pub struct MulNode { pub a: Tensor, pub b: Tensor }
+pub struct MulNode {
+    pub a: Tensor,
+    pub b: Tensor,
+}
 impl AutogradNode for MulNode {
-    fn inputs(&self) -> Vec<Tensor> { vec![self.a.clone(), self.b.clone()] }
+    fn inputs(&self) -> Vec<Tensor> {
+        vec![self.a.clone(), self.b.clone()]
+    }
     fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
         let grad_a = UnifiedTensor::empty(&self.a.ctx, &self.a.data.shape);
         let grad_b = UnifiedTensor::empty(&self.b.ctx, &self.b.data.shape);
-        engine.mul_backward(&self.a.ctx, grad, &self.a.data, &self.b.data, &grad_a, &grad_b);
+        engine.mul_backward(
+            &self.a.ctx,
+            grad,
+            &self.a.data,
+            &self.b.data,
+            &grad_a,
+            &grad_b,
+        );
         vec![grad_a, grad_b]
     }
 }
 
-pub struct SubNode { pub a: Tensor, pub b: Tensor }
+pub struct SubNode {
+    pub a: Tensor,
+    pub b: Tensor,
+}
 impl AutogradNode for SubNode {
-    fn inputs(&self) -> Vec<Tensor> { vec![self.a.clone(), self.b.clone()] }
+    fn inputs(&self) -> Vec<Tensor> {
+        vec![self.a.clone(), self.b.clone()]
+    }
     fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
         let grad_a = UnifiedTensor::empty(&self.a.ctx, &self.a.data.shape);
         let grad_b = UnifiedTensor::empty(&self.b.ctx, &self.b.data.shape);
@@ -170,9 +213,13 @@ impl AutogradNode for SubNode {
     }
 }
 
-pub struct SiLUNode { pub input: Tensor }
+pub struct SiLUNode {
+    pub input: Tensor,
+}
 impl AutogradNode for SiLUNode {
-    fn inputs(&self) -> Vec<Tensor> { vec![self.input.clone()] }
+    fn inputs(&self) -> Vec<Tensor> {
+        vec![self.input.clone()]
+    }
     fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
         let grad_in = UnifiedTensor::empty(&self.input.ctx, &self.input.data.shape);
         engine.silu_backward(&self.input.ctx, grad, &self.input.data, &grad_in);
@@ -180,9 +227,13 @@ impl AutogradNode for SiLUNode {
     }
 }
 
-pub struct ReluNode { pub input: Tensor }
+pub struct ReluNode {
+    pub input: Tensor,
+}
 impl AutogradNode for ReluNode {
-    fn inputs(&self) -> Vec<Tensor> { vec![self.input.clone()] }
+    fn inputs(&self) -> Vec<Tensor> {
+        vec![self.input.clone()]
+    }
     fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
         let grad_in = UnifiedTensor::empty(&self.input.ctx, &self.input.data.shape);
         engine.relu_backward(&self.input.ctx, grad, &self.input.data, &grad_in);
@@ -190,9 +241,14 @@ impl AutogradNode for ReluNode {
     }
 }
 
-pub struct SoftmaxNode { pub input: Tensor, pub output: Tensor }
+pub struct SoftmaxNode {
+    pub input: Tensor,
+    pub output: Tensor,
+}
 impl AutogradNode for SoftmaxNode {
-    fn inputs(&self) -> Vec<Tensor> { vec![self.input.clone()] }
+    fn inputs(&self) -> Vec<Tensor> {
+        vec![self.input.clone()]
+    }
     fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
         let grad_in = UnifiedTensor::empty(&self.input.ctx, &self.input.data.shape);
         engine.softmax_backward(&self.input.ctx, grad, &self.output.data, &grad_in);
@@ -200,9 +256,14 @@ impl AutogradNode for SoftmaxNode {
     }
 }
 
-pub struct MSELossNode { pub pred: Tensor, pub target: Tensor }
+pub struct MSELossNode {
+    pub pred: Tensor,
+    pub target: Tensor,
+}
 impl AutogradNode for MSELossNode {
-    fn inputs(&self) -> Vec<Tensor> { vec![self.pred.clone(), self.target.clone()] }
+    fn inputs(&self) -> Vec<Tensor> {
+        vec![self.pred.clone(), self.target.clone()]
+    }
     fn backward(&self, _grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
         let grad_in = UnifiedTensor::empty(&self.pred.ctx, &self.pred.data.shape);
         engine.mse_loss_backward(&self.pred.ctx, &self.pred.data, &self.target.data, &grad_in);
@@ -215,15 +276,22 @@ impl AutogradNode for MSELossNode {
 /// Cross-entropy loss node for LLM training
 /// Forward: -log(softmax(logits)[target])
 /// Backward: softmax(logits) - one_hot(target)
-pub struct CrossEntropyLossNode { 
-    pub logits: Tensor, 
+pub struct CrossEntropyLossNode {
+    pub logits: Tensor,
     pub target_idx: u32,
 }
 impl AutogradNode for CrossEntropyLossNode {
-    fn inputs(&self) -> Vec<Tensor> { vec![self.logits.clone()] }
+    fn inputs(&self) -> Vec<Tensor> {
+        vec![self.logits.clone()]
+    }
     fn backward(&self, _grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
         let grad_logits = UnifiedTensor::empty(&self.logits.ctx, &self.logits.data.shape);
-        engine.cross_entropy_backward(&self.logits.ctx, &self.logits.data, self.target_idx, &grad_logits);
+        engine.cross_entropy_backward(
+            &self.logits.ctx,
+            &self.logits.data,
+            self.target_idx,
+            &grad_logits,
+        );
         vec![grad_logits]
     }
 }
@@ -236,11 +304,20 @@ pub struct SiLUGateNode {
     pub gate: Tensor,
 }
 impl AutogradNode for SiLUGateNode {
-    fn inputs(&self) -> Vec<Tensor> { vec![self.up.clone(), self.gate.clone()] }
+    fn inputs(&self) -> Vec<Tensor> {
+        vec![self.up.clone(), self.gate.clone()]
+    }
     fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
         let grad_up = UnifiedTensor::empty(&self.up.ctx, &self.up.data.shape);
         let grad_gate = UnifiedTensor::empty(&self.gate.ctx, &self.gate.data.shape);
-        engine.silu_gate_backward(&self.up.ctx, &self.up.data, &self.gate.data, grad, &grad_up, &grad_gate);
+        engine.silu_gate_backward(
+            &self.up.ctx,
+            &self.up.data,
+            &self.gate.data,
+            grad,
+            &grad_up,
+            &grad_gate,
+        );
         vec![grad_up, grad_gate]
     }
 }
@@ -252,7 +329,13 @@ impl AutogradNode for SiLUGateNode {
 /// Trait for functions that can be checkpointed
 pub trait CheckpointFn: Send + Sync {
     fn forward(&self, inputs: &[Tensor], engine: &ComputeEngine) -> Vec<Tensor>;
-    fn backward(&self, inputs: &[Tensor], outputs: &[Tensor], grad_outputs: &[UnifiedTensor], engine: &ComputeEngine) -> Vec<UnifiedTensor>;
+    fn backward(
+        &self,
+        inputs: &[Tensor],
+        outputs: &[Tensor],
+        grad_outputs: &[UnifiedTensor],
+        engine: &ComputeEngine,
+    ) -> Vec<UnifiedTensor>;
 }
 
 /// Node that recomputes forward pass during backward to save memory
@@ -263,16 +346,17 @@ pub struct CheckpointedNode {
 }
 
 impl AutogradNode for CheckpointedNode {
-    fn inputs(&self) -> Vec<Tensor> { 
-        self.inputs.clone() 
+    fn inputs(&self) -> Vec<Tensor> {
+        self.inputs.clone()
     }
-    
+
     fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
         // Recompute forward pass to get activations
         let recomputed_outputs = self.checkpoint_fn.forward(&self.inputs, engine);
-        
+
         // Now compute backward with recomputed activations
-        self.checkpoint_fn.backward(&self.inputs, &recomputed_outputs, &[grad.clone()], engine)
+        self.checkpoint_fn
+            .backward(&self.inputs, &recomputed_outputs, &[grad.clone()], engine)
     }
 }
 
@@ -285,7 +369,7 @@ where
 {
     // Create wrapper for the forward function
     struct FnWrapper<Func>(Func);
-    
+
     impl<Func> CheckpointFn for FnWrapper<Func>
     where
         Func: Fn(&[Tensor], &ComputeEngine) -> Vec<Tensor> + Send + Sync,
@@ -293,15 +377,21 @@ where
         fn forward(&self, inputs: &[Tensor], engine: &ComputeEngine) -> Vec<Tensor> {
             (self.0)(inputs, engine)
         }
-        
-        fn backward(&self, inputs: &[Tensor], outputs: &[Tensor], grad_outputs: &[UnifiedTensor], engine: &ComputeEngine) -> Vec<UnifiedTensor> {
+
+        fn backward(
+            &self,
+            inputs: &[Tensor],
+            outputs: &[Tensor],
+            grad_outputs: &[UnifiedTensor],
+            engine: &ComputeEngine,
+        ) -> Vec<UnifiedTensor> {
             // Run backward on the recomputed outputs
             // Each output should have been created with autograd, so we can backprop through it
             let input_grads: Vec<UnifiedTensor> = vec![];
             for (i, (output, grad)) in outputs.iter().zip(grad_outputs.iter()).enumerate() {
                 *output.grad.borrow_mut() = Some(grad.clone());
             }
-            
+
             // Trigger backward on each output
             for output in outputs {
                 if output.creator.is_some() {
@@ -312,26 +402,32 @@ where
                     }
                 }
             }
-            
+
             // Return empty grads if no backward path
-            inputs.iter().map(|t| UnifiedTensor::zeros(&t.ctx, &t.data.shape)).collect()
+            inputs
+                .iter()
+                .map(|t| UnifiedTensor::zeros(&t.ctx, &t.data.shape))
+                .collect()
         }
     }
-    
+
     // Run forward pass
     let outputs = forward_fn(&inputs, engine);
-    
+
     // Create checkpointed outputs that will recompute on backward
     let checkpoint_fn = Arc::new(FnWrapper(forward_fn));
-    
-    outputs.into_iter().map(|output| {
-        let node = Arc::new(CheckpointedNode {
-            inputs: inputs.clone(),
-            checkpoint_fn: checkpoint_fn.clone(),
-            outputs: vec![output.clone()],
-        });
-        Tensor::with_creator(output.ctx.clone(), output.data.as_ref().clone(), node)
-    }).collect()
+
+    outputs
+        .into_iter()
+        .map(|output| {
+            let node = Arc::new(CheckpointedNode {
+                inputs: inputs.clone(),
+                checkpoint_fn: checkpoint_fn.clone(),
+                outputs: vec![output.clone()],
+            });
+            Tensor::with_creator(output.ctx.clone(), output.data.as_ref().clone(), node)
+        })
+        .collect()
 }
 
 /// Convenience function for checkpointing a single-output function
@@ -347,7 +443,7 @@ where
 
 /// Apply checkpointing to a sequence of functions (e.g., transformer blocks)
 /// This is the main entry point for memory-efficient training of large models.
-/// 
+///
 /// Usage:
 /// ```rust
 /// // Instead of:
@@ -355,11 +451,11 @@ where
 /// for block in &blocks {
 ///     x = block.forward(&x, engine);
 /// }
-/// 
+///
 /// // Use checkpointed version:
 /// let x = checkpoint_single(hidden, |h, eng| layer.forward(h, eng), engine);
 /// ```
-/// 
+///
 /// For sequential layers, apply checkpoint_single to each layer in a loop:
 /// ```rust,ignore
 /// let mut x = input;
@@ -370,48 +466,66 @@ where
 
 impl Tensor {
     pub fn matmul(a: &Tensor, b: &Tensor, engine: &ComputeEngine) -> Tensor {
-
         let out_shape = vec![a.data.shape[0], b.data.shape[1]];
         let out_data = UnifiedTensor::empty(&a.ctx, &out_shape);
         engine.matmul(&a.ctx, &a.data, &b.data, &out_data);
-        let node = Arc::new(MatMulNode { a: a.clone(), b: b.clone() });
+        let node = Arc::new(MatMulNode {
+            a: a.clone(),
+            b: b.clone(),
+        });
         Tensor::with_creator(a.ctx.clone(), out_data, node)
     }
     pub fn add(a: &Tensor, b: &Tensor, engine: &ComputeEngine) -> Tensor {
         let out_data = UnifiedTensor::empty(&a.ctx, &a.data.shape);
         engine.add(&a.ctx, &a.data, &b.data, &out_data);
-        let node = Arc::new(AddNode { a: a.clone(), b: b.clone() });
+        let node = Arc::new(AddNode {
+            a: a.clone(),
+            b: b.clone(),
+        });
         Tensor::with_creator(a.ctx.clone(), out_data, node)
     }
     pub fn mul(a: &Tensor, b: &Tensor, engine: &ComputeEngine) -> Tensor {
         let out_data = UnifiedTensor::empty(&a.ctx, &a.data.shape);
         engine.mul(&a.ctx, &a.data, &b.data, &out_data);
-        let node = Arc::new(MulNode { a: a.clone(), b: b.clone() });
+        let node = Arc::new(MulNode {
+            a: a.clone(),
+            b: b.clone(),
+        });
         Tensor::with_creator(a.ctx.clone(), out_data, node)
     }
     pub fn sub(a: &Tensor, b: &Tensor, engine: &ComputeEngine) -> Tensor {
         let out_data = UnifiedTensor::empty(&a.ctx, &a.data.shape);
         engine.sub(&a.ctx, &a.data, &b.data, &out_data);
-        let node = Arc::new(SubNode { a: a.clone(), b: b.clone() });
+        let node = Arc::new(SubNode {
+            a: a.clone(),
+            b: b.clone(),
+        });
         Tensor::with_creator(a.ctx.clone(), out_data, node)
     }
     pub fn silu(input: &Tensor, engine: &ComputeEngine) -> Tensor {
         let out_data = UnifiedTensor::empty(&input.ctx, &input.data.shape);
         engine.silu(&input.ctx, &input.data, &out_data);
-        let node = Arc::new(SiLUNode { input: input.clone() });
+        let node = Arc::new(SiLUNode {
+            input: input.clone(),
+        });
         Tensor::with_creator(input.ctx.clone(), out_data, node)
     }
     pub fn mse_loss(pred: &Tensor, target: &Tensor, engine: &ComputeEngine) -> Tensor {
         let out_data = UnifiedTensor::empty(&pred.ctx, &[1]);
         engine.mse_loss(&pred.ctx, &pred.data, &target.data, &out_data);
-        let node = Arc::new(MSELossNode { pred: pred.clone(), target: target.clone() });
+        let node = Arc::new(MSELossNode {
+            pred: pred.clone(),
+            target: target.clone(),
+        });
         Tensor::with_creator(pred.ctx.clone(), out_data, node)
     }
 
     pub fn relu(input: &Tensor, engine: &ComputeEngine) -> Tensor {
         let out_data = UnifiedTensor::empty(&input.ctx, &input.data.shape);
         engine.relu(&input.ctx, &input.data, &out_data);
-        let node = Arc::new(ReluNode { input: input.clone() });
+        let node = Arc::new(ReluNode {
+            input: input.clone(),
+        });
         Tensor::with_creator(input.ctx.clone(), out_data, node)
     }
 
@@ -419,7 +533,10 @@ impl Tensor {
         let out_data = UnifiedTensor::empty(&input.ctx, &input.data.shape);
         engine.softmax(&input.ctx, &input.data, &out_data);
         let out_tensor = Tensor::new(input.ctx.clone(), out_data);
-        let node = Arc::new(SoftmaxNode { input: input.clone(), output: out_tensor.clone() });
+        let node = Arc::new(SoftmaxNode {
+            input: input.clone(),
+            output: out_tensor.clone(),
+        });
         Tensor::with_creator(input.ctx.clone(), out_tensor.data.as_ref().clone(), node)
     }
 
@@ -428,7 +545,10 @@ impl Tensor {
     pub fn cross_entropy_loss(logits: &Tensor, target: u32, engine: &ComputeEngine) -> Tensor {
         let out_data = UnifiedTensor::empty(&logits.ctx, &[1]);
         engine.cross_entropy_loss(&logits.ctx, &logits.data, target, &out_data);
-        let node = Arc::new(CrossEntropyLossNode { logits: logits.clone(), target_idx: target });
+        let node = Arc::new(CrossEntropyLossNode {
+            logits: logits.clone(),
+            target_idx: target,
+        });
         Tensor::with_creator(logits.ctx.clone(), out_data, node)
     }
 
@@ -437,11 +557,13 @@ impl Tensor {
     pub fn silu_gate_fused(up: &Tensor, gate: &Tensor, engine: &ComputeEngine) -> Tensor {
         let out_data = UnifiedTensor::empty(&up.ctx, &up.data.shape);
         engine.silu_gate_fused(&up.ctx, &up.data, &gate.data, &out_data);
-        let node = Arc::new(SiLUGateNode { up: up.clone(), gate: gate.clone() });
+        let node = Arc::new(SiLUGateNode {
+            up: up.clone(),
+            gate: gate.clone(),
+        });
         Tensor::with_creator(up.ctx.clone(), out_data, node)
     }
 }
-
 
 pub trait Optimizer: Send + Sync {
     fn step(&mut self, params: &[Tensor]);
@@ -491,11 +613,18 @@ impl AdamW {
             let grad_borrow = param.grad.borrow();
             if let Some(grad) = grad_borrow.as_ref() {
                 let key = Arc::as_ptr(&param.data) as usize;
-                
-                let m = self.m_states.entry(key).or_insert_with(|| UnifiedTensor::zeros(&param.ctx, &param.data.shape));
-                let v = self.v_states.entry(key).or_insert_with(|| UnifiedTensor::zeros(&param.ctx, &param.data.shape));
-                
-                self.engine.adamw_update(&param.ctx, &param.data, grad, m, v, &p);
+
+                let m = self
+                    .m_states
+                    .entry(key)
+                    .or_insert_with(|| UnifiedTensor::zeros(&param.ctx, &param.data.shape));
+                let v = self
+                    .v_states
+                    .entry(key)
+                    .or_insert_with(|| UnifiedTensor::zeros(&param.ctx, &param.data.shape));
+
+                self.engine
+                    .adamw_update(&param.ctx, &param.data, grad, m, v, &p);
             }
         }
     }
@@ -539,7 +668,12 @@ pub struct CosineAnnealingLR {
 
 impl CosineAnnealingLR {
     pub fn new(initial_lr: f32, min_lr: f32, total_steps: usize) -> Self {
-        Self { initial_lr, min_lr, total_steps, current: 0 }
+        Self {
+            initial_lr,
+            min_lr,
+            total_steps,
+            current: 0,
+        }
     }
 }
 
@@ -574,7 +708,13 @@ pub struct WarmupCosineScheduler {
 
 impl WarmupCosineScheduler {
     pub fn new(peak_lr: f32, min_lr: f32, warmup_steps: usize, total_steps: usize) -> Self {
-        Self { peak_lr, min_lr, warmup_steps, total_steps, current: 0 }
+        Self {
+            peak_lr,
+            min_lr,
+            warmup_steps,
+            total_steps,
+            current: 0,
+        }
     }
 }
 

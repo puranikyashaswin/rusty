@@ -10,7 +10,8 @@ pub struct BufferPool {
 impl std::fmt::Debug for BufferPool {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let buffers = self.buffers.lock().unwrap();
-        let counts: HashMap<u64, usize> = buffers.iter().map(|(sz, list)| (*sz, list.len())).collect();
+        let counts: HashMap<u64, usize> =
+            buffers.iter().map(|(sz, list)| (*sz, list.len())).collect();
         f.debug_struct("BufferPool")
             .field("usage", &self.usage)
             .field("buffer_counts", &counts)
@@ -33,7 +34,7 @@ impl BufferPool {
                 return buffer;
             }
         }
-        
+
         // Create new if none available
         Arc::new(device.create_buffer(&BufferDescriptor {
             label: Some("Pooled Buffer"),
@@ -47,7 +48,7 @@ impl BufferPool {
         let mut buffers = self.buffers.lock().unwrap();
         buffers.entry(size).or_insert_with(Vec::new).push(buffer);
     }
-    
+
     pub fn clear(&self) {
         let mut buffers = self.buffers.lock().unwrap();
         buffers.clear();

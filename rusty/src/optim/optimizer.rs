@@ -8,13 +8,13 @@ use crate::tensor::Tensor;
 pub trait Optimizer {
     /// Perform one optimization step (update parameters).
     fn step(&mut self);
-    
+
     /// Zero all parameter gradients.
     fn zero_grad(&self);
-    
+
     /// Get the learning rate.
     fn lr(&self) -> f32;
-    
+
     /// Set the learning rate.
     fn set_lr(&mut self, lr: f32);
 }

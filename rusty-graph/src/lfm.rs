@@ -1,4 +1,4 @@
-use crate::{Linear, RMSNorm, MLP, Tensor, KVCacheLayer, Attention};
+use crate::{Attention, KVCacheLayer, Linear, RMSNorm, Tensor, MLP};
 use rusty_backend::{ComputeEngine, UnifiedTensor};
 use std::sync::Arc;
 
@@ -12,10 +12,16 @@ pub struct Lfm2Conv {
 impl Lfm2Conv {
     pub fn forward(&self, engine: &ComputeEngine, x: &Tensor) -> Tensor {
         let projected = self.in_proj.forward(engine, x);
-        
+
         let out_data = UnifiedTensor::empty(&x.ctx, &projected.data.shape);
-        engine.conv1d(&x.ctx, &projected.data, &self.conv_weight.data, &self.conv_bias.data, &out_data);
-        
+        engine.conv1d(
+            &x.ctx,
+            &projected.data,
+            &self.conv_weight.data,
+            &self.conv_bias.data,
+            &out_data,
+        );
+
         let conv_out = Tensor::new(x.ctx.clone(), out_data);
         self.out_proj.forward(engine, &conv_out)
     }
@@ -48,7 +54,13 @@ pub struct Lfm2Block {
 }
 
 impl Lfm2Block {
-    pub fn forward(&self, engine: &ComputeEngine, x: &Tensor, pos: usize, cache: Option<&KVCacheLayer>) -> Tensor {
+    pub fn forward(
+        &self,
+        engine: &ComputeEngine,
+        x: &Tensor,
+        pos: usize,
+        cache: Option<&KVCacheLayer>,
+    ) -> Tensor {
         // Residual 1: x + Op(Norm(x))
         let h = self.operator_norm.forward(engine, x);
         let h = match &self.op {
@@ -93,9 +105,15 @@ pub struct Lfm2Model {
 }
 
 impl Lfm2Model {
-    pub fn forward(&self, engine: &ComputeEngine, input_ids: &[u32], pos: usize, cache: Option<&mut crate::KVCache>) -> Tensor {
+    pub fn forward(
+        &self,
+        engine: &ComputeEngine,
+        input_ids: &[u32],
+        pos: usize,
+        cache: Option<&mut crate::KVCache>,
+    ) -> Tensor {
         let ctx = self.embed_tokens.ctx.clone();
-        
+
         // 1. Embedding
         // Note: Generic Embedding.forward usually handles this, manual here for LFM specific
         let mut x = self.lookup_embeddings(&ctx, engine, input_ids);
@@ -112,18 +130,26 @@ impl Lfm2Model {
         self.lm_head.forward(engine, &x)
     }
 
-    fn lookup_embeddings(&self, ctx: &Arc<rusty_backend::WgpuContext>, _engine: &ComputeEngine, ids: &[u32]) -> Tensor {
+    fn lookup_embeddings(
+        &self,
+        ctx: &Arc<rusty_backend::WgpuContext>,
+        _engine: &ComputeEngine,
+        ids: &[u32],
+    ) -> Tensor {
         let hidden_dim = self.embed_tokens.data.shape[1];
         let seq_len = ids.len();
         let mut data = Vec::with_capacity(seq_len * hidden_dim);
-        
+
         // Host-side lookup (Mocking for now as we don't have a high-perf GPU embedding kernel yet)
         let w = pollster::block_on(self.embed_tokens.data.to_vec(ctx));
         for &id in ids {
             let start = (id as usize) * hidden_dim;
-            data.extend_from_slice(&w[start..start+hidden_dim]);
+            data.extend_from_slice(&w[start..start + hidden_dim]);
         }
-        Tensor::new(ctx.clone(), UnifiedTensor::new(ctx, &data, &[1, seq_len, hidden_dim]))
+        Tensor::new(
+            ctx.clone(),
+            UnifiedTensor::new(ctx, &data, &[1, seq_len, hidden_dim]),
+        )
     }
 
     pub fn lora_params(&self) -> Vec<Tensor> {

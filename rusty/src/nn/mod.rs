@@ -2,18 +2,18 @@
 //!
 //! PyTorch-style neural network building blocks.
 
-mod module;
-mod linear;
 mod activation;
-mod normalization;
-mod container;
 mod attention;
+mod container;
 mod embedding;
+mod linear;
+mod module;
+mod normalization;
 
-pub use module::Module;
-pub use linear::Linear;
-pub use activation::{ReLU, SiLU, GELU, Sigmoid, Tanh, Softmax};
-pub use normalization::{LayerNorm, RMSNorm};
-pub use container::{Sequential, ModuleList};
+pub use activation::{ReLU, SiLU, Sigmoid, Softmax, Tanh, GELU};
 pub use attention::MultiHeadAttention;
+pub use container::{ModuleList, Sequential};
 pub use embedding::Embedding;
+pub use linear::Linear;
+pub use module::Module;
+pub use normalization::{LayerNorm, RMSNorm};

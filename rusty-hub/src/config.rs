@@ -1,9 +1,9 @@
 //! Model configuration parsing
 
-use serde::{Deserialize, Serialize};
-use std::path::Path;
-use std::fs;
 use crate::HubResult;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 
 /// Model configuration from config.json
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -11,54 +11,58 @@ pub struct ModelConfig {
     /// Model architecture type
     #[serde(default)]
     pub architectures: Vec<String>,
-    
+
     /// Hidden size / embedding dimension
     #[serde(default)]
     pub hidden_size: usize,
-    
+
     /// Number of attention heads
     #[serde(default)]
     pub num_attention_heads: usize,
-    
+
     /// Number of key-value heads (for GQA)
     #[serde(default)]
     pub num_key_value_heads: Option<usize>,
-    
+
     /// Number of transformer layers
     #[serde(default)]
     pub num_hidden_layers: usize,
-    
+
     /// Intermediate size (MLP)
     #[serde(default)]
     pub intermediate_size: usize,
-    
+
     /// Vocabulary size
     #[serde(default)]
     pub vocab_size: usize,
-    
+
     /// Maximum context length
     #[serde(default)]
     pub max_position_embeddings: usize,
-    
+
     /// RMS norm epsilon
     #[serde(default = "default_rms_eps")]
     pub rms_norm_eps: f32,
-    
+
     /// RoPE theta
     #[serde(default = "default_rope_theta")]
     pub rope_theta: f32,
-    
+
     /// Tie word embeddings
     #[serde(default)]
     pub tie_word_embeddings: bool,
-    
+
     /// Model type string
     #[serde(default)]
     pub model_type: String,
 }
 
-fn default_rms_eps() -> f32 { 1e-5 }
-fn default_rope_theta() -> f32 { 10000.0 }
+fn default_rms_eps() -> f32 {
+    1e-5
+}
+fn default_rope_theta() -> f32 {
+    10000.0
+}
 
 impl ModelConfig {
     /// Load config from a config.json file.

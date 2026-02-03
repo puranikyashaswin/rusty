@@ -2,8 +2,8 @@
 //!
 //! Stochastic Gradient Descent with optional momentum.
 
-use crate::tensor::Tensor;
 use super::Optimizer;
+use crate::tensor::Tensor;
 
 /// Stochastic Gradient Descent optimizer.
 ///
@@ -66,14 +66,14 @@ impl Optimizer for SGD {
             if let Some(grad_tensor) = param.grad() {
                 let grad = grad_tensor.to_vec();
                 let mut weights = param.to_vec();
-                
+
                 // Apply weight decay
                 if self.weight_decay > 0.0 {
                     for (w, _g) in weights.iter_mut().zip(grad.iter()) {
                         *w -= self.weight_decay * self.lr * *w;
                     }
                 }
-                
+
                 // Apply momentum if enabled
                 if self.momentum > 0.0 {
                     let v = self.velocities[i].get_or_insert_with(|| vec![0.0; grad.len()]);
@@ -86,7 +86,7 @@ impl Optimizer for SGD {
                         *w -= self.lr * *g;
                     }
                 }
-                
+
                 // Write back
                 param.copy_from_slice(&weights);
             }

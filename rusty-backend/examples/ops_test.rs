@@ -1,11 +1,11 @@
-use rusty_backend::{WgpuContext, UnifiedTensor, ComputeEngine};
+use rusty_backend::{ComputeEngine, UnifiedTensor, WgpuContext};
 
 fn main() {
     env_logger::init();
     pollster::block_on(async {
         let ctx = WgpuContext::new().await;
         let engine = ComputeEngine::new(&ctx);
-        
+
         println!("--- Testing MatMul ---");
         // 2x2 * 2x2 = 2x2
         // [1 2]   [1 0]   [1 0]
@@ -24,7 +24,7 @@ fn main() {
         let rms_out = UnifiedTensor::empty(&ctx, &[4]);
         engine.rms_norm(&ctx, &rms_in, &rms_w, &rms_out);
         println!("RMS Result: {:?}", rms_out.to_vec(&ctx).await);
-        
+
         println!("--- Testing SiLU ---");
         // SiLU(1) = 1 / (1 + e^-1) ~= 0.731
         let silu_in = UnifiedTensor::new(&ctx, &[1.0, -1.0], &[2]);
@@ -40,4 +40,3 @@ fn main() {
         println!("Softmax Result: {:?}", sm_out.to_vec(&ctx).await);
     });
 }
-

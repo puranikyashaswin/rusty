@@ -3,7 +3,7 @@
 //! Measures performance of key GPU operations and compares against theoretical peaks.
 //! Run with: cargo run -p rusty-benchmarks --release
 
-use rusty_backend::{WgpuContext, ComputeEngine, UnifiedTensor};
+use rusty_backend::{ComputeEngine, UnifiedTensor, WgpuContext};
 use std::time::Instant;
 
 const WARMUP_ITERS: usize = 5;
@@ -16,9 +16,7 @@ fn main() {
     println!();
 
     // Initialize GPU
-    let ctx = pollster::block_on(async {
-        WgpuContext::new().await
-    });
+    let ctx = pollster::block_on(async { WgpuContext::new().await });
     let engine = ComputeEngine::new(&ctx);
 
     // Print GPU info
@@ -149,7 +147,9 @@ fn bench_elementwise(ctx: &WgpuContext, engine: &ComputeEngine, size: usize, lab
 }
 
 fn bench_softmax(ctx: &WgpuContext, engine: &ComputeEngine, batch: usize, seq_len: usize) {
-    let data: Vec<f32> = (0..batch * seq_len).map(|i| (i % 100) as f32 / 10.0).collect();
+    let data: Vec<f32> = (0..batch * seq_len)
+        .map(|i| (i % 100) as f32 / 10.0)
+        .collect();
 
     let input = UnifiedTensor::new(ctx, &data, &[batch, seq_len]);
     let output = UnifiedTensor::empty(ctx, &[batch, seq_len]);
@@ -178,7 +178,9 @@ fn bench_softmax(ctx: &WgpuContext, engine: &ComputeEngine, batch: usize, seq_le
 }
 
 fn bench_rmsnorm(ctx: &WgpuContext, engine: &ComputeEngine, hidden_dim: usize, seq_len: usize) {
-    let data: Vec<f32> = (0..seq_len * hidden_dim).map(|i| (i % 100) as f32 / 100.0).collect();
+    let data: Vec<f32> = (0..seq_len * hidden_dim)
+        .map(|i| (i % 100) as f32 / 100.0)
+        .collect();
     let weight: Vec<f32> = (0..hidden_dim).map(|_| 1.0).collect();
 
     let input = UnifiedTensor::new(ctx, &data, &[seq_len, hidden_dim]);
@@ -209,7 +211,9 @@ fn bench_rmsnorm(ctx: &WgpuContext, engine: &ComputeEngine, hidden_dim: usize, s
 }
 
 fn bench_silu(ctx: &WgpuContext, engine: &ComputeEngine, size: usize, label: &str) {
-    let data: Vec<f32> = (0..size).map(|i| (i as f32 / size as f32) * 2.0 - 1.0).collect();
+    let data: Vec<f32> = (0..size)
+        .map(|i| (i as f32 / size as f32) * 2.0 - 1.0)
+        .collect();
 
     let input = UnifiedTensor::new(ctx, &data, &[size]);
     let output = UnifiedTensor::empty(ctx, &[size]);

@@ -11,9 +11,9 @@
 //! let config = ModelConfig::from_model_dir(&model_path)?;
 //! ```
 
-use std::path::PathBuf;
-use std::fs;
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
 
 pub mod config;
 pub mod models;
@@ -44,11 +44,15 @@ impl std::fmt::Display for HubError {
 impl std::error::Error for HubError {}
 
 impl From<std::io::Error> for HubError {
-    fn from(e: std::io::Error) -> Self { Self::Io(e) }
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 
 impl From<serde_json::Error> for HubError {
-    fn from(e: serde_json::Error) -> Self { Self::Json(e) }
+    fn from(e: serde_json::Error) -> Self {
+        Self::Json(e)
+    }
 }
 
 pub type HubResult<T> = Result<T, HubError>;
@@ -73,10 +77,8 @@ impl RustyHub {
     ///
     /// Default cache: `~/.cache/huggingface/hub/models--{org}--{model}`
     pub fn new() -> Self {
-        let cache_dir = dirs_cache_dir()
-            .join("huggingface")
-            .join("hub");
-        
+        let cache_dir = dirs_cache_dir().join("huggingface").join("hub");
+
         Self { cache_dir }
     }
 
@@ -97,10 +99,10 @@ impl RustyHub {
     /// Find the latest snapshot of a model.
     pub fn find_latest_snapshot(&self, model_id: &str) -> HubResult<PathBuf> {
         let snapshots_dir = self.get_model_path(model_id);
-        
+
         if !snapshots_dir.exists() {
             return Err(HubError::ModelNotFound(format!(
-                "Model {} not found. Download with: huggingface-cli download {}", 
+                "Model {} not found. Download with: huggingface-cli download {}",
                 model_id, model_id
             )));
         }
@@ -136,7 +138,7 @@ impl RustyHub {
         if !self.cache_dir.exists() {
             return vec![];
         }
-        
+
         fs::read_dir(&self.cache_dir)
             .map(|entries| {
                 entries
@@ -152,7 +154,7 @@ impl RustyHub {
     /// Get safetensors file paths for a model.
     pub fn get_weight_files(&self, model_id: &str) -> HubResult<Vec<PathBuf>> {
         let snapshot = self.find_latest_snapshot(model_id)?;
-        
+
         let mut files = Vec::new();
         for entry in fs::read_dir(&snapshot)? {
             let entry = entry?;
@@ -161,7 +163,7 @@ impl RustyHub {
                 files.push(path);
             }
         }
-        
+
         // Sort to ensure consistent order
         files.sort();
         Ok(files)
@@ -195,6 +197,8 @@ mod tests {
     fn test_model_path() {
         let hub = RustyHub::new();
         let path = hub.get_model_path("meta-llama/Llama-3.2-1B");
-        assert!(path.to_string_lossy().contains("models--meta-llama--Llama-3.2-1B"));
+        assert!(path
+            .to_string_lossy()
+            .contains("models--meta-llama--Llama-3.2-1B"));
     }
 }

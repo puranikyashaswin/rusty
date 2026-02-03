@@ -4,7 +4,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use wgpu::{Device, ComputePipeline, ShaderModule, Buffer, BindGroup, BindGroupLayout};
+use wgpu::{BindGroup, BindGroupLayout, Buffer, ComputePipeline, Device, ShaderModule};
 
 use super::KERNELS_WGSL;
 
@@ -56,33 +56,53 @@ impl ComputeEngine {
         // Compile all kernels
         let kernel_names = [
             // Binary ops
-            "add", "sub", "mul", "div_kernel",
+            "add",
+            "sub",
+            "mul",
+            "div_kernel",
             // Scalar ops
-            "add_scalar", "mul_scalar",
+            "add_scalar",
+            "mul_scalar",
             // MatMul
-            "matmul", "matmul_bt", "matmul_at",
+            "matmul",
+            "matmul_bt",
+            "matmul_at",
             // Activations
-            "relu", "silu", "gelu", "sigmoid", "tanh_act",
+            "relu",
+            "silu",
+            "gelu",
+            "sigmoid",
+            "tanh_act",
             // Normalization
-            "rms_norm", "layer_norm",
+            "rms_norm",
+            "layer_norm",
             // Softmax & Loss
-            "softmax", "log_softmax", "cross_entropy",
+            "softmax",
+            "log_softmax",
+            "cross_entropy",
             // Positional
             "rope",
             // Embedding
             "embedding_lookup",
             // Backward ops
-            "add_backward", "sub_backward", "mul_backward",
-            "relu_backward", "silu_backward", "gelu_backward",
+            "add_backward",
+            "sub_backward",
+            "mul_backward",
+            "relu_backward",
+            "silu_backward",
+            "gelu_backward",
             "softmax_backward",
             // Optimizer
-            "sgd_update", "adamw_update",
+            "sgd_update",
+            "adamw_update",
             // Loss
-            "mse_loss", "mse_loss_backward",
+            "mse_loss",
+            "mse_loss_backward",
             // Quantization
             "affine_dequantize",
             // Utilities
-            "copy", "fill",
+            "copy",
+            "fill",
         ];
 
         for name in kernel_names {
@@ -95,7 +115,6 @@ impl ComputeEngine {
             });
             pipelines.insert(name.to_string(), pipeline);
         }
-
 
         Self {
             shader_module,
@@ -208,7 +227,9 @@ impl ComputeEngine {
         bind_group: &BindGroup,
         workgroups: (u32, u32, u32),
     ) {
-        let pipeline = self.pipelines.get(pipeline_name)
+        let pipeline = self
+            .pipelines
+            .get(pipeline_name)
             .unwrap_or_else(|| panic!("Pipeline '{}' not found", pipeline_name));
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {

@@ -4,7 +4,7 @@
 //! and provides a clean interface for creating tensors on specific hardware.
 
 use std::sync::Arc;
-use wgpu::{Instance, Adapter, Device as WgpuDevice, Queue};
+use wgpu::{Adapter, Device as WgpuDevice, Instance, Queue};
 
 use crate::backend::ComputeEngine;
 
@@ -63,7 +63,6 @@ impl Device {
             )
             .await
             .expect("Failed to create GPU device");
-
 
         let device = Arc::new(device);
         let queue = Arc::new(queue);

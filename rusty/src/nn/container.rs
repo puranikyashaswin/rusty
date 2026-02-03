@@ -2,9 +2,9 @@
 //!
 //! Sequential and ModuleList containers.
 
+use super::{LayerNorm, Linear, Module, RMSNorm, ReLU, SiLU, Sigmoid, Tanh, GELU};
 use crate::tensor::Tensor;
 use crate::Device;
-use super::{Module, Linear, ReLU, SiLU, GELU, Sigmoid, Tanh, LayerNorm, RMSNorm};
 
 /// A layer that can be added to Sequential.
 pub enum Layer {
@@ -126,35 +126,51 @@ impl std::fmt::Debug for Sequential {
 
 // Implement From for common types
 impl From<Linear> for Layer {
-    fn from(l: Linear) -> Self { Layer::Linear(l) }
+    fn from(l: Linear) -> Self {
+        Layer::Linear(l)
+    }
 }
 
 impl From<ReLU> for Layer {
-    fn from(l: ReLU) -> Self { Layer::ReLU(l) }
+    fn from(l: ReLU) -> Self {
+        Layer::ReLU(l)
+    }
 }
 
 impl From<SiLU> for Layer {
-    fn from(l: SiLU) -> Self { Layer::SiLU(l) }
+    fn from(l: SiLU) -> Self {
+        Layer::SiLU(l)
+    }
 }
 
 impl From<GELU> for Layer {
-    fn from(l: GELU) -> Self { Layer::GELU(l) }
+    fn from(l: GELU) -> Self {
+        Layer::GELU(l)
+    }
 }
 
 impl From<Sigmoid> for Layer {
-    fn from(l: Sigmoid) -> Self { Layer::Sigmoid(l) }
+    fn from(l: Sigmoid) -> Self {
+        Layer::Sigmoid(l)
+    }
 }
 
 impl From<Tanh> for Layer {
-    fn from(l: Tanh) -> Self { Layer::Tanh(l) }
+    fn from(l: Tanh) -> Self {
+        Layer::Tanh(l)
+    }
 }
 
 impl From<LayerNorm> for Layer {
-    fn from(l: LayerNorm) -> Self { Layer::LayerNorm(l) }
+    fn from(l: LayerNorm) -> Self {
+        Layer::LayerNorm(l)
+    }
 }
 
 impl From<RMSNorm> for Layer {
-    fn from(l: RMSNorm) -> Self { Layer::RMSNorm(l) }
+    fn from(l: RMSNorm) -> Self {
+        Layer::RMSNorm(l)
+    }
 }
 
 /// ModuleList - stores modules in a list.
@@ -165,7 +181,9 @@ pub struct ModuleList {
 impl ModuleList {
     /// Create an empty ModuleList.
     pub fn new() -> Self {
-        Self { modules: Vec::new() }
+        Self {
+            modules: Vec::new(),
+        }
     }
 
     /// Add a module.

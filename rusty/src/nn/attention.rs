@@ -2,9 +2,9 @@
 //!
 //! Self-attention mechanism used in transformers.
 
+use super::{Linear, Module};
 use crate::tensor::Tensor;
 use crate::Device;
-use super::{Module, Linear};
 
 /// Multi-Head Attention layer.
 ///
@@ -29,9 +29,12 @@ pub struct MultiHeadAttention {
 impl MultiHeadAttention {
     /// Create a new MultiHeadAttention layer.
     pub fn new(hidden_dim: usize, n_heads: usize, device: &Device) -> Self {
-        assert!(hidden_dim % n_heads == 0, "hidden_dim must be divisible by n_heads");
+        assert!(
+            hidden_dim % n_heads == 0,
+            "hidden_dim must be divisible by n_heads"
+        );
         let head_dim = hidden_dim / n_heads;
-        
+
         Self {
             q_proj: Linear::new_no_bias(hidden_dim, hidden_dim, device),
             k_proj: Linear::new_no_bias(hidden_dim, hidden_dim, device),
@@ -53,17 +56,17 @@ impl Module for MultiHeadAttention {
 
         // For now, simplified single-head attention (no reshape/split)
         // TODO: Implement proper multi-head attention with reshape
-        
+
         // Attention scores: Q @ K^T / sqrt(d)
         let scale = 1.0 / (self.head_dim as f32).sqrt();
         let scores = q.matmul(&k).mul_scalar(scale);
-        
+
         // Softmax
         let attn = scores.softmax(-1);
-        
+
         // Apply to values
         let out = attn.matmul(&v);
-        
+
         // Output projection
         self.o_proj.forward(&out)
     }

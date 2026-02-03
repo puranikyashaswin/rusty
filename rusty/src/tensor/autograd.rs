@@ -5,8 +5,8 @@
 use std::sync::RwLock;
 use wgpu::{Buffer, BufferUsages};
 
-use crate::Device;
 use super::Tensor;
+use crate::Device;
 
 /// Gradient storage cell (thread-safe).
 pub struct GradCell {
@@ -15,15 +15,19 @@ pub struct GradCell {
 
 impl GradCell {
     pub fn new() -> Self {
-        Self { inner: RwLock::new(None) }
+        Self {
+            inner: RwLock::new(None),
+        }
     }
 
     pub fn set(&self, device: &Device, data: &[f32], _shape: &[usize]) {
-        let buffer = device.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Gradient Buffer"),
-            contents: bytemuck::cast_slice(data),
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-        });
+        let buffer = device
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Gradient Buffer"),
+                contents: bytemuck::cast_slice(data),
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+            });
         *self.inner.write().unwrap() = Some(buffer);
     }
 
@@ -44,10 +48,16 @@ impl GradCell {
         *self.inner.write().unwrap() = None;
     }
 
-    pub fn accumulate(&self, device: &Device, engine: &crate::backend::ComputeEngine, new_grad: &Buffer, shape: &[usize]) {
+    pub fn accumulate(
+        &self,
+        device: &Device,
+        engine: &crate::backend::ComputeEngine,
+        new_grad: &Buffer,
+        shape: &[usize],
+    ) {
         let size: usize = shape.iter().product();
         let mut inner = self.inner.write().unwrap();
-        
+
         if let Some(ref existing) = *inner {
             // Create output buffer for accumulated gradient
             let out_buffer = device.device.create_buffer(&wgpu::BufferDescriptor {
@@ -59,8 +69,24 @@ impl GradCell {
 
             // Dispatch add kernel
             let pipeline = engine.get_pipeline("add").unwrap();
-            let bind_group = engine.create_binary_bind_group(&device.device, pipeline, existing, new_grad, &out_buffer);
-            engine.dispatch(&device.device, &device.queue, "add", &bind_group, (crate::backend::ComputeEngine::workgroups_1d(size as u32), 1, 1));
+            let bind_group = engine.create_binary_bind_group(
+                &device.device,
+                pipeline,
+                existing,
+                new_grad,
+                &out_buffer,
+            );
+            engine.dispatch(
+                &device.device,
+                &device.queue,
+                "add",
+                &bind_group,
+                (
+                    crate::backend::ComputeEngine::workgroups_1d(size as u32),
+                    1,
+                    1,
+                ),
+            );
 
             *inner = Some(out_buffer);
         } else {
@@ -72,9 +98,12 @@ impl GradCell {
                 mapped_at_creation: false,
             });
 
-            let mut encoder = device.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Grad Copy Encoder"),
-            });
+            let mut encoder =
+                device
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Grad Copy Encoder"),
+                    });
             encoder.copy_buffer_to_buffer(new_grad, 0, &out_buffer, 0, (size * 4) as u64);
             device.queue.submit(std::iter::once(encoder.finish()));
 
@@ -83,14 +112,13 @@ impl GradCell {
     }
 }
 
-
 use wgpu::util::DeviceExt;
 
 /// Trait for autograd computation nodes.
 pub trait AutogradNode: Send + Sync {
     /// Get input tensors to this node.
     fn inputs(&self) -> Vec<Tensor>;
-    
+
     /// Compute gradients for inputs given output gradient.
     fn backward(&self, grad_output: &Tensor, device: &Device);
 }
@@ -113,10 +141,14 @@ impl AutogradNode for AddNode {
     fn backward(&self, grad_output: &Tensor, device: &Device) {
         // grad_a = grad_out, grad_b = grad_out
         if self.a.requires_grad {
-            self.a.grad.accumulate(device, device.engine(), &grad_output.buffer, &self.a.shape);
+            self.a
+                .grad
+                .accumulate(device, device.engine(), &grad_output.buffer, &self.a.shape);
         }
         if self.b.requires_grad {
-            self.b.grad.accumulate(device, device.engine(), &grad_output.buffer, &self.b.shape);
+            self.b
+                .grad
+                .accumulate(device, device.engine(), &grad_output.buffer, &self.b.shape);
         }
     }
 }
@@ -137,7 +169,9 @@ impl AutogradNode for SubNode {
         let size = self.a.numel();
 
         if self.a.requires_grad {
-            self.a.grad.accumulate(device, engine, &grad_output.buffer, &self.a.shape);
+            self.a
+                .grad
+                .accumulate(device, engine, &grad_output.buffer, &self.a.shape);
         }
         if self.b.requires_grad {
             // grad_b = -grad_out
@@ -149,11 +183,13 @@ impl AutogradNode for SubNode {
             });
 
             // Use mul_scalar with -1.0
-            let neg_one = device.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Neg One"),
-                contents: bytemuck::cast_slice(&[-1.0f32]),
-                usage: BufferUsages::UNIFORM,
-            });
+            let neg_one = device
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Neg One"),
+                    contents: bytemuck::cast_slice(&[-1.0f32]),
+                    usage: BufferUsages::UNIFORM,
+                });
 
             let pipeline = engine.get_pipeline("mul_scalar").unwrap();
             let layout = pipeline.get_bind_group_layout(0);
@@ -161,15 +197,35 @@ impl AutogradNode for SubNode {
                 label: None,
                 layout: &layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: grad_output.buffer.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: neg_grad.as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: neg_one.as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: grad_output.buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: neg_grad.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: neg_one.as_entire_binding(),
+                    },
                 ],
             });
-            engine.dispatch(&device.device, &device.queue, "mul_scalar", &bind_group, 
-                (crate::backend::ComputeEngine::workgroups_1d(size as u32), 1, 1));
+            engine.dispatch(
+                &device.device,
+                &device.queue,
+                "mul_scalar",
+                &bind_group,
+                (
+                    crate::backend::ComputeEngine::workgroups_1d(size as u32),
+                    1,
+                    1,
+                ),
+            );
 
-            self.b.grad.accumulate(device, engine, &neg_grad, &self.b.shape);
+            self.b
+                .grad
+                .accumulate(device, engine, &neg_grad, &self.b.shape);
         }
     }
 }
@@ -198,10 +254,27 @@ impl AutogradNode for MulNode {
                 mapped_at_creation: false,
             });
             let pipeline = engine.get_pipeline("mul").unwrap();
-            let bind_group = engine.create_binary_bind_group(&device.device, pipeline, &grad_output.buffer, &self.b.buffer, &grad_a);
-            engine.dispatch(&device.device, &device.queue, "mul", &bind_group, 
-                (crate::backend::ComputeEngine::workgroups_1d(size as u32), 1, 1));
-            self.a.grad.accumulate(device, engine, &grad_a, &self.a.shape);
+            let bind_group = engine.create_binary_bind_group(
+                &device.device,
+                pipeline,
+                &grad_output.buffer,
+                &self.b.buffer,
+                &grad_a,
+            );
+            engine.dispatch(
+                &device.device,
+                &device.queue,
+                "mul",
+                &bind_group,
+                (
+                    crate::backend::ComputeEngine::workgroups_1d(size as u32),
+                    1,
+                    1,
+                ),
+            );
+            self.a
+                .grad
+                .accumulate(device, engine, &grad_a, &self.a.shape);
         }
 
         // grad_b = grad_out * a
@@ -213,10 +286,27 @@ impl AutogradNode for MulNode {
                 mapped_at_creation: false,
             });
             let pipeline = engine.get_pipeline("mul").unwrap();
-            let bind_group = engine.create_binary_bind_group(&device.device, pipeline, &grad_output.buffer, &self.a.buffer, &grad_b);
-            engine.dispatch(&device.device, &device.queue, "mul", &bind_group, 
-                (crate::backend::ComputeEngine::workgroups_1d(size as u32), 1, 1));
-            self.b.grad.accumulate(device, engine, &grad_b, &self.b.shape);
+            let bind_group = engine.create_binary_bind_group(
+                &device.device,
+                pipeline,
+                &grad_output.buffer,
+                &self.a.buffer,
+                &grad_b,
+            );
+            engine.dispatch(
+                &device.device,
+                &device.queue,
+                "mul",
+                &bind_group,
+                (
+                    crate::backend::ComputeEngine::workgroups_1d(size as u32),
+                    1,
+                    1,
+                ),
+            );
+            self.b
+                .grad
+                .accumulate(device, engine, &grad_b, &self.b.shape);
         }
     }
 }
@@ -247,18 +337,35 @@ impl AutogradNode for MatMulNode {
                 mapped_at_creation: false,
             });
 
-            let params = device.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("MatMul BT Params"),
-                contents: bytemuck::cast_slice(&[m as u32, n as u32, k as u32, 0u32]),
-                usage: BufferUsages::UNIFORM,
-            });
+            let params = device
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("MatMul BT Params"),
+                    contents: bytemuck::cast_slice(&[m as u32, n as u32, k as u32, 0u32]),
+                    usage: BufferUsages::UNIFORM,
+                });
 
             let pipeline = engine.get_pipeline("matmul_bt").unwrap();
-            let bind_group = engine.create_matmul_bind_group(&device.device, pipeline, &grad_output.buffer, &self.b.buffer, &grad_a, &params);
+            let bind_group = engine.create_matmul_bind_group(
+                &device.device,
+                pipeline,
+                &grad_output.buffer,
+                &self.b.buffer,
+                &grad_a,
+                &params,
+            );
             let (wx, wy) = crate::backend::ComputeEngine::workgroups_2d(m as u32, k as u32);
-            engine.dispatch(&device.device, &device.queue, "matmul_bt", &bind_group, (wx, wy, 1));
-            
-            self.a.grad.accumulate(device, engine, &grad_a, &self.a.shape);
+            engine.dispatch(
+                &device.device,
+                &device.queue,
+                "matmul_bt",
+                &bind_group,
+                (wx, wy, 1),
+            );
+
+            self.a
+                .grad
+                .accumulate(device, engine, &grad_a, &self.a.shape);
         }
 
         // grad_b = a.T @ grad_out  [K, M] @ [M, N] = [K, N]
@@ -270,18 +377,35 @@ impl AutogradNode for MatMulNode {
                 mapped_at_creation: false,
             });
 
-            let params = device.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("MatMul AT Params"),
-                contents: bytemuck::cast_slice(&[k as u32, m as u32, n as u32, 0u32]),
-                usage: BufferUsages::UNIFORM,
-            });
+            let params = device
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("MatMul AT Params"),
+                    contents: bytemuck::cast_slice(&[k as u32, m as u32, n as u32, 0u32]),
+                    usage: BufferUsages::UNIFORM,
+                });
 
             let pipeline = engine.get_pipeline("matmul_at").unwrap();
-            let bind_group = engine.create_matmul_bind_group(&device.device, pipeline, &self.a.buffer, &grad_output.buffer, &grad_b, &params);
+            let bind_group = engine.create_matmul_bind_group(
+                &device.device,
+                pipeline,
+                &self.a.buffer,
+                &grad_output.buffer,
+                &grad_b,
+                &params,
+            );
             let (wx, wy) = crate::backend::ComputeEngine::workgroups_2d(k as u32, n as u32);
-            engine.dispatch(&device.device, &device.queue, "matmul_at", &bind_group, (wx, wy, 1));
-            
-            self.b.grad.accumulate(device, engine, &grad_b, &self.b.shape);
+            engine.dispatch(
+                &device.device,
+                &device.queue,
+                "matmul_at",
+                &bind_group,
+                (wx, wy, 1),
+            );
+
+            self.b
+                .grad
+                .accumulate(device, engine, &grad_b, &self.b.shape);
         }
     }
 }
@@ -301,8 +425,10 @@ impl AutogradNode for ReLUNode {
     }
 
     fn backward(&self, grad_output: &Tensor, device: &Device) {
-        if !self.input.requires_grad { return; }
-        
+        if !self.input.requires_grad {
+            return;
+        }
+
         let engine = device.engine();
         let size = self.input.numel();
 
@@ -319,17 +445,43 @@ impl AutogradNode for ReLUNode {
             label: None,
             layout: &layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.input.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: grad_in.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: grad_output.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: self.input.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: grad_in.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.input.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: grad_in.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: grad_output.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: self.input.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: grad_in.as_entire_binding(),
+                },
             ],
         });
-        engine.dispatch(&device.device, &device.queue, "relu_backward", &bind_group, 
-            (crate::backend::ComputeEngine::workgroups_1d(size as u32), 1, 1));
-        
-        self.input.grad.accumulate(device, engine, &grad_in, &self.input.shape);
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "relu_backward",
+            &bind_group,
+            (
+                crate::backend::ComputeEngine::workgroups_1d(size as u32),
+                1,
+                1,
+            ),
+        );
+
+        self.input
+            .grad
+            .accumulate(device, engine, &grad_in, &self.input.shape);
     }
 }
 
@@ -344,8 +496,10 @@ impl AutogradNode for SiLUNode {
     }
 
     fn backward(&self, grad_output: &Tensor, device: &Device) {
-        if !self.input.requires_grad { return; }
-        
+        if !self.input.requires_grad {
+            return;
+        }
+
         let engine = device.engine();
         let size = self.input.numel();
 
@@ -362,17 +516,43 @@ impl AutogradNode for SiLUNode {
             label: None,
             layout: &layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.input.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: grad_in.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: grad_output.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: self.input.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: grad_in.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.input.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: grad_in.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: grad_output.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: self.input.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: grad_in.as_entire_binding(),
+                },
             ],
         });
-        engine.dispatch(&device.device, &device.queue, "silu_backward", &bind_group, 
-            (crate::backend::ComputeEngine::workgroups_1d(size as u32), 1, 1));
-        
-        self.input.grad.accumulate(device, engine, &grad_in, &self.input.shape);
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "silu_backward",
+            &bind_group,
+            (
+                crate::backend::ComputeEngine::workgroups_1d(size as u32),
+                1,
+                1,
+            ),
+        );
+
+        self.input
+            .grad
+            .accumulate(device, engine, &grad_in, &self.input.shape);
     }
 }
 
@@ -387,8 +567,10 @@ impl AutogradNode for GELUNode {
     }
 
     fn backward(&self, grad_output: &Tensor, device: &Device) {
-        if !self.input.requires_grad { return; }
-        
+        if !self.input.requires_grad {
+            return;
+        }
+
         let engine = device.engine();
         let size = self.input.numel();
 
@@ -405,16 +587,42 @@ impl AutogradNode for GELUNode {
             label: None,
             layout: &layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.input.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: grad_in.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 3, resource: grad_output.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 4, resource: self.input.buffer.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: grad_in.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.input.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: grad_in.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: grad_output.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: self.input.buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: grad_in.as_entire_binding(),
+                },
             ],
         });
-        engine.dispatch(&device.device, &device.queue, "gelu_backward", &bind_group, 
-            (crate::backend::ComputeEngine::workgroups_1d(size as u32), 1, 1));
-        
-        self.input.grad.accumulate(device, engine, &grad_in, &self.input.shape);
+        engine.dispatch(
+            &device.device,
+            &device.queue,
+            "gelu_backward",
+            &bind_group,
+            (
+                crate::backend::ComputeEngine::workgroups_1d(size as u32),
+                1,
+                1,
+            ),
+        );
+
+        self.input
+            .grad
+            .accumulate(device, engine, &grad_in, &self.input.shape);
     }
 }

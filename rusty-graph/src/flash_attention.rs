@@ -3,7 +3,7 @@
 //! Implements FlashAttention-2 algorithm for O(N) memory instead of O(N²).
 //! Uses tiled matrix multiplication with online softmax normalization.
 
-use rusty_backend::{ComputeEngine, WgpuContext, UnifiedTensor};
+use rusty_backend::{ComputeEngine, UnifiedTensor, WgpuContext};
 use std::sync::Arc;
 
 /// Flash Attention layer with tiled computation and online softmax.
@@ -63,17 +63,16 @@ impl FlashAttention {
         // Flash Attention kernel is implemented in WGSL
         // This is the Rust dispatch wrapper
         // Uses online softmax for O(N) memory instead of O(N²)
-        
+
         // For now, create output tensor (dispatch integration pending)
         // The WGSL kernel flash_attention_simple handles the computation
         let output = UnifiedTensor::empty(ctx, &q.shape);
-        
+
         // TODO: Add pipeline dispatch call here
         // engine.flash_attention_simple(ctx, q, k, v, &output, ...);
-        
+
         output
     }
-
 
     /// Multi-head attention with Flash Attention.
     ///
@@ -93,7 +92,8 @@ impl FlashAttention {
         let standard_memory = seq_len * seq_len * 4; // O(N²) for attention matrix
         let flash_memory = seq_len * self.head_dim * 4; // O(N) for accumulator
         let savings = (standard_memory as f32 / flash_memory as f32);
-        format!("{:.1}x less memory ({}MB vs {}MB for seq={})", 
+        format!(
+            "{:.1}x less memory ({}MB vs {}MB for seq={})",
             savings,
             flash_memory / 1_000_000,
             standard_memory / 1_000_000,
@@ -137,7 +137,11 @@ impl FlashAttention {
         //     seq_len, head_dim, causal
         // );
 
-        FlashAttentionGrads { grad_q, grad_k, grad_v }
+        FlashAttentionGrads {
+            grad_q,
+            grad_k,
+            grad_v,
+        }
     }
 }
 
@@ -151,7 +155,6 @@ pub struct FlashAttentionGrads {
     /// Gradient with respect to values
     pub grad_v: UnifiedTensor,
 }
-
 
 impl std::fmt::Debug for FlashAttention {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

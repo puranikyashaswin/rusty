@@ -22,7 +22,7 @@ pub enum SerializeError {
 }
 
 /// Save tensors to a custom binary format.
-/// 
+///
 /// Format:
 /// - 4 bytes: number of tensors (u32)
 /// - For each tensor:
@@ -37,25 +37,25 @@ pub fn save_tensors<P: AsRef<Path>>(
     path: P,
 ) -> Result<(), SerializeError> {
     let mut file = File::create(path)?;
-    
+
     // Write number of tensors
     let num_tensors = tensors.len() as u32;
     file.write_all(&num_tensors.to_le_bytes())?;
-    
+
     for (name, tensor) in tensors {
         // Write name
         let name_bytes = name.as_bytes();
         let name_len = name_bytes.len() as u32;
         file.write_all(&name_len.to_le_bytes())?;
         file.write_all(name_bytes)?;
-        
+
         // Write shape
         let ndim = tensor.shape.len() as u32;
         file.write_all(&ndim.to_le_bytes())?;
         for &dim in &tensor.shape {
             file.write_all(&(dim as u32).to_le_bytes())?;
         }
-        
+
         // Write data
         let data = tensor.to_vec();
         let data_len = data.len() as u32;
@@ -64,7 +64,7 @@ pub fn save_tensors<P: AsRef<Path>>(
             file.write_all(&val.to_le_bytes())?;
         }
     }
-    
+
     Ok(())
 }
 
@@ -75,12 +75,12 @@ pub fn load_tensors<P: AsRef<Path>>(
 ) -> Result<HashMap<String, Tensor>, SerializeError> {
     let mut file = File::open(path)?;
     let mut tensors = HashMap::new();
-    
+
     // Read number of tensors
     let mut buf4 = [0u8; 4];
     file.read_exact(&mut buf4)?;
     let num_tensors = u32::from_le_bytes(buf4);
-    
+
     for _ in 0..num_tensors {
         // Read name
         file.read_exact(&mut buf4)?;
@@ -88,7 +88,7 @@ pub fn load_tensors<P: AsRef<Path>>(
         let mut name_bytes = vec![0u8; name_len];
         file.read_exact(&mut name_bytes)?;
         let name = String::from_utf8_lossy(&name_bytes).to_string();
-        
+
         // Read shape
         file.read_exact(&mut buf4)?;
         let ndim = u32::from_le_bytes(buf4) as usize;
@@ -97,7 +97,7 @@ pub fn load_tensors<P: AsRef<Path>>(
             file.read_exact(&mut buf4)?;
             shape.push(u32::from_le_bytes(buf4) as usize);
         }
-        
+
         // Read data
         file.read_exact(&mut buf4)?;
         let data_len = u32::from_le_bytes(buf4) as usize;
@@ -106,11 +106,11 @@ pub fn load_tensors<P: AsRef<Path>>(
             file.read_exact(&mut buf4)?;
             data.push(f32::from_le_bytes(buf4));
         }
-        
+
         let tensor = Tensor::from_data(&data, &shape, device);
         tensors.insert(name, tensor);
     }
-    
+
     Ok(tensors)
 }
 
@@ -118,16 +118,16 @@ pub fn load_tensors<P: AsRef<Path>>(
 pub trait Saveable {
     /// Get all parameters as a named dictionary.
     fn state_dict(&self) -> HashMap<String, Tensor>;
-    
+
     /// Load parameters from a named dictionary.
-    fn load_state_dict(&mut self, state_dict: HashMap<String, Tensor>) -> Result<(), SerializeError>;
+    fn load_state_dict(
+        &mut self,
+        state_dict: HashMap<String, Tensor>,
+    ) -> Result<(), SerializeError>;
 }
 
 /// Helper to save model parameters.
-pub fn save_model<P: AsRef<Path>>(
-    model: &impl Saveable,
-    path: P,
-) -> Result<(), SerializeError> {
+pub fn save_model<P: AsRef<Path>>(model: &impl Saveable, path: P) -> Result<(), SerializeError> {
     let state_dict = model.state_dict();
     save_tensors(&state_dict, path)
 }

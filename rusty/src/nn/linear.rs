@@ -2,9 +2,9 @@
 //!
 //! Fully connected layer: y = xW + b
 
+use super::Module;
 use crate::tensor::Tensor;
 use crate::Device;
-use super::Module;
 
 /// Linear (fully connected) layer.
 ///
@@ -35,7 +35,7 @@ impl Linear {
             .mul_scalar(scale)
             .requires_grad_();
         let bias = Tensor::zeros(&[out_features], device).requires_grad_();
-        
+
         Self {
             weight,
             bias: Some(bias),
@@ -48,11 +48,8 @@ impl Linear {
         let weight = Tensor::randn(&[in_features, out_features], device)
             .mul_scalar(scale)
             .requires_grad_();
-        
-        Self {
-            weight,
-            bias: None,
-        }
+
+        Self { weight, bias: None }
     }
 
     /// Create a Linear layer from existing weights.
@@ -65,7 +62,7 @@ impl Module for Linear {
     fn forward(&self, x: &Tensor) -> Tensor {
         // x: [..., in_features] @ weight: [in_features, out_features] = [..., out_features]
         let out = x.matmul(&self.weight);
-        
+
         if let Some(ref bias) = self.bias {
             // Broadcasting add - for now assume bias matches last dim
             // In production we'd have proper broadcasting

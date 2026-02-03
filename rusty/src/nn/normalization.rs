@@ -2,9 +2,9 @@
 //!
 //! Layer normalization and RMS normalization.
 
+use super::Module;
 use crate::tensor::Tensor;
 use crate::Device;
-use super::Module;
 
 /// Layer Normalization.
 ///
@@ -26,7 +26,7 @@ impl LayerNorm {
         let size: usize = normalized_shape.iter().product();
         let gamma = Tensor::ones(&[size], device).requires_grad_();
         let beta = Tensor::zeros(&[size], device).requires_grad_();
-        
+
         Self {
             gamma,
             beta,
@@ -49,17 +49,18 @@ impl Module for LayerNorm {
         // TODO: Optimize with GPU kernel
         let data = x.to_vec();
         let size = self.normalized_shape.iter().product::<usize>();
-        
+
         // Compute mean and variance
         let mean: f32 = data.iter().sum::<f32>() / size as f32;
         let variance: f32 = data.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / size as f32;
         let inv_std = 1.0 / (variance + self.eps).sqrt();
-        
+
         // Normalize and apply affine
         let gamma_data = self.gamma.to_vec();
         let beta_data = self.beta.to_vec();
-        
-        let result: Vec<f32> = data.iter()
+
+        let result: Vec<f32> = data
+            .iter()
             .enumerate()
             .map(|(i, &v)| {
                 let idx = i % size;
@@ -67,7 +68,7 @@ impl Module for LayerNorm {
                 normalized * gamma_data[idx] + beta_data[idx]
             })
             .collect();
-        
+
         Tensor::from_data(&result, &x.shape, &x.device)
     }
 
@@ -101,7 +102,7 @@ impl RMSNorm {
     /// Create a new RMSNorm layer.
     pub fn new(hidden_size: usize, device: &Device) -> Self {
         let weight = Tensor::ones(&[hidden_size], device).requires_grad_();
-        
+
         Self {
             weight,
             eps: 1e-5,
@@ -119,7 +120,11 @@ impl RMSNorm {
     /// Create from existing weights.
     pub fn from_weights(weight: Tensor, eps: f32) -> Self {
         let hidden_size = weight.numel();
-        Self { weight, eps, hidden_size }
+        Self {
+            weight,
+            eps,
+            hidden_size,
+        }
     }
 }
 
@@ -128,22 +133,23 @@ impl Module for RMSNorm {
         // CPU fallback for now
         let data = x.to_vec();
         let size = self.hidden_size;
-        
+
         // Compute RMS
         let sq_sum: f32 = data.iter().map(|v| v * v).sum::<f32>();
         let rms = (sq_sum / size as f32 + self.eps).sqrt();
         let inv_rms = 1.0 / rms;
-        
+
         // Normalize and scale
         let weight_data = self.weight.to_vec();
-        let result: Vec<f32> = data.iter()
+        let result: Vec<f32> = data
+            .iter()
             .enumerate()
             .map(|(i, &v)| {
                 let idx = i % size;
                 v * inv_rms * weight_data[idx]
             })
             .collect();
-        
+
         Tensor::from_data(&result, &x.shape, &x.device)
     }
 

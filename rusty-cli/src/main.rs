@@ -6,13 +6,13 @@
 //! 3. Train on custom dataset
 //! 4. Save trained adapters
 
-use rusty_backend::{WgpuContext, ComputeEngine};
 use rusty_autograd::AdamW;
+use rusty_backend::{ComputeEngine, WgpuContext};
 use rusty_graph::model_builder::{Lfm2ModelBuilder, LoRaConfig};
-use rusty_loader::{WeightsContext, ModelLoader, Tokenizer, Sampler};
-use std::sync::Arc;
+use rusty_loader::{ModelLoader, Sampler, Tokenizer, WeightsContext};
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 #[derive(serde::Deserialize)]
 struct Sample {
@@ -22,15 +22,15 @@ struct Sample {
 
 fn main() {
     env_logger::init();
-    
+
     // Parse command line args
     let args: Vec<String> = std::env::args().collect();
-    
+
     if args.len() < 2 {
         print_usage();
         return;
     }
-    
+
     match args[1].as_str() {
         "--help" | "-h" => print_usage(),
         "--demo" => run_demo(),
@@ -123,18 +123,16 @@ async fn run_finetune(model_path: &str, dataset_path: Option<&str>) {
         println!();
         println!("[DATA] Loading training dataset...");
         match fs::read_to_string(path) {
-            Ok(content) => {
-                match serde_json::from_str::<Vec<Sample>>(&content) {
-                    Ok(s) => {
-                        println!("       Loaded {} training samples", s.len());
-                        s
-                    }
-                    Err(e) => {
-                        println!("       [WARN] Failed to parse dataset: {}", e);
-                        create_default_samples()
-                    }
+            Ok(content) => match serde_json::from_str::<Vec<Sample>>(&content) {
+                Ok(s) => {
+                    println!("       Loaded {} training samples", s.len());
+                    s
                 }
-            }
+                Err(e) => {
+                    println!("       [WARN] Failed to parse dataset: {}", e);
+                    create_default_samples()
+                }
+            },
             Err(_) => {
                 println!("       [WARN] Dataset file not found, using default samples");
                 create_default_samples()
@@ -191,13 +189,16 @@ async fn run_finetune(model_path: &str, dataset_path: Option<&str>) {
             "o_proj".to_string(),
         ],
     };
-    
+
     let model = Lfm2ModelBuilder::new(ctx.clone(), engine.clone(), &weights_ctx, config.clone())
         .with_lora(lora_config)
         .build();
-    
+
     let lora_params = model.lora_params();
-    println!("        Model built with {} LoRA parameters", lora_params.len());
+    println!(
+        "        Model built with {} LoRA parameters",
+        lora_params.len()
+    );
 
     // 7. Setup Training
     println!();
@@ -216,70 +217,82 @@ async fn run_finetune(model_path: &str, dataset_path: Option<&str>) {
     println!("   ------+-------------+------------");
 
     let _optimizer = AdamW::new(engine.clone(), learning_rate as f32);
-    
+
     for epoch in 0..epochs {
         let mut total_loss = 0.0;
-        
+
         for sample in &samples {
             let input_tokens = tokenizer.encode(&format!("{} {}", sample.prompt, sample.response));
             let input_ids: Vec<u32> = input_tokens.into_iter().take(128).collect();
-            
-            if input_ids.is_empty() { continue; }
-            
+
+            if input_ids.is_empty() {
+                continue;
+            }
+
             // Forward pass
             let logits = model.forward(&engine, &input_ids, 0, None);
             let logits_data = logits.data.to_vec(&ctx).await;
-            
+
             // Compute cross-entropy loss
             let vocab_size = config.vocab_size;
             let seq_len = logits_data.len() / vocab_size;
-            
-            if seq_len == 0 { continue; }
-            
+
+            if seq_len == 0 {
+                continue;
+            }
+
             let mut loss_val = 0.0f32;
             let mut count = 0;
-            
+
             for pos in 0..seq_len.saturating_sub(1) {
                 let start = pos * vocab_size;
                 let end = start + vocab_size;
-                if end > logits_data.len() { break; }
-                
+                if end > logits_data.len() {
+                    break;
+                }
+
                 let logits_slice = &logits_data[start..end];
                 let target_id = if pos + 1 < input_ids.len() {
                     input_ids[pos + 1] as usize
                 } else {
                     continue;
                 };
-                
-                if target_id >= vocab_size { continue; }
-                
-                let max_logit = logits_slice.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+
+                if target_id >= vocab_size {
+                    continue;
+                }
+
+                let max_logit = logits_slice
+                    .iter()
+                    .cloned()
+                    .fold(f32::NEG_INFINITY, f32::max);
                 let exp_sum: f32 = logits_slice.iter().map(|x| (x - max_logit).exp()).sum();
                 let log_softmax = logits_slice[target_id] - max_logit - exp_sum.ln();
-                
+
                 loss_val += -log_softmax;
                 count += 1;
             }
-            
+
             if count > 0 {
                 loss_val /= count as f32;
             }
             total_loss += loss_val;
-            
+
             // Gradient update (simplified)
             let grad_scale = learning_rate as f32 * 0.01;
             for param in &lora_params {
                 let param_data = param.data.to_vec(&ctx).await;
-                let updated: Vec<f32> = param_data.iter()
+                let updated: Vec<f32> = param_data
+                    .iter()
                     .map(|&v| v - grad_scale * loss_val.signum() * (rand::random::<f32>() - 0.5))
                     .collect();
                 param.data.write_data(&ctx, bytemuck::cast_slice(&updated));
             }
         }
-        
+
         let avg_loss = total_loss / samples.len() as f32;
         let progress = "=".repeat((epoch * 20 / epochs).max(1));
-        
+
         if epoch % 2 == 0 || epoch == epochs - 1 {
             println!("   {:5} |   {:9.4} | {}", epoch, avg_loss, progress);
         }
@@ -295,28 +308,39 @@ async fn run_finetune(model_path: &str, dataset_path: Option<&str>) {
     println!("[TEST] Testing inference...");
     println!();
     let sampler = Sampler::default();
-    
+
     let test_prompts = ["Hello!", "What can you do?", "Tell me about yourself"];
     for prompt in test_prompts {
         let input_tokens = tokenizer.encode(prompt);
-        
+
         let logits = model.forward(&engine, &input_tokens, 0, None);
         let logits_data = logits.data.to_vec(&ctx).await;
-        
+
         let vocab_size = config.vocab_size;
         let mut generated = Vec::new();
         for i in 0..20 {
             let start = i * vocab_size;
-            if start >= logits_data.len() { break; }
+            if start >= logits_data.len() {
+                break;
+            }
             let end = (start + vocab_size).min(logits_data.len());
             let token = sampler.sample(&logits_data[start..end]);
-            if token == tokenizer.eos_token_id { break; }
+            if token == tokenizer.eos_token_id {
+                break;
+            }
             generated.push(token);
         }
-        
+
         let response = tokenizer.decode(&generated);
         println!("   Q: \"{}\"", prompt);
-        println!("   A: \"{}\"", if response.is_empty() { "(generating...)" } else { &response });
+        println!(
+            "   A: \"{}\"",
+            if response.is_empty() {
+                "(generating...)"
+            } else {
+                &response
+            }
+        );
         println!();
     }
 
@@ -333,11 +357,10 @@ fn create_byte_tokenizer() -> Tokenizer {
     vocab.insert("<s>".to_string(), 1);
     vocab.insert("</s>".to_string(), 2);
     vocab.insert("<pad>".to_string(), 0);
-    
-    let id_to_token: std::collections::HashMap<u32, String> = vocab.iter()
-        .map(|(k, v)| (*v, k.clone()))
-        .collect();
-    
+
+    let id_to_token: std::collections::HashMap<u32, String> =
+        vocab.iter().map(|(k, v)| (*v, k.clone())).collect();
+
     Tokenizer {
         vocab,
         id_to_token,
@@ -349,8 +372,19 @@ fn create_byte_tokenizer() -> Tokenizer {
 
 fn create_default_samples() -> Vec<Sample> {
     vec![
-        Sample { prompt: "Hello".to_string(), response: "Hi! How can I help you today?".to_string() },
-        Sample { prompt: "What is Rust?".to_string(), response: "Rust is a systems programming language focused on safety and performance.".to_string() },
-        Sample { prompt: "Explain ML".to_string(), response: "Machine Learning is a subset of AI that enables systems to learn from data.".to_string() },
+        Sample {
+            prompt: "Hello".to_string(),
+            response: "Hi! How can I help you today?".to_string(),
+        },
+        Sample {
+            prompt: "What is Rust?".to_string(),
+            response: "Rust is a systems programming language focused on safety and performance."
+                .to_string(),
+        },
+        Sample {
+            prompt: "Explain ML".to_string(),
+            response: "Machine Learning is a subset of AI that enables systems to learn from data."
+                .to_string(),
+        },
     ]
 }

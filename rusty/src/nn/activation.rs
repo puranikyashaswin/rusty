@@ -2,8 +2,8 @@
 //!
 //! Non-linear activation functions as neural network modules.
 
-use crate::tensor::Tensor;
 use super::Module;
+use crate::tensor::Tensor;
 
 /// ReLU activation: max(0, x)
 #[derive(Debug, Clone, Copy)]

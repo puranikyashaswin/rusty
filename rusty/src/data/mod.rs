@@ -2,8 +2,8 @@
 //!
 //! Dataset trait and DataLoader for batch training.
 
-mod dataset;
 mod dataloader;
+mod dataset;
 
-pub use dataset::{Dataset, TensorDataset};
 pub use dataloader::DataLoader;
+pub use dataset::{Dataset, TensorDataset};

@@ -65,7 +65,10 @@ impl ModelType {
 
     /// Check if the model type is supported by Rusty.
     pub fn is_supported(&self) -> bool {
-        matches!(self, Self::Llama | Self::Mistral | Self::Phi | Self::Qwen | Self::Gemma)
+        matches!(
+            self,
+            Self::Llama | Self::Mistral | Self::Phi | Self::Qwen | Self::Gemma
+        )
     }
 
     /// Get the display name.

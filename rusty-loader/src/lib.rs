@@ -1,14 +1,14 @@
 use memmap2::MmapOptions;
 use safetensors::SafeTensors;
-use std::fs::File;
-use std::path::Path;
-use thiserror::Error;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::fs::File;
+use std::path::Path;
 use std::sync::Arc;
+use thiserror::Error;
 
 pub mod tokenizer;
-pub use tokenizer::{Tokenizer, Sampler};
+pub use tokenizer::{Sampler, Tokenizer};
 
 use rusty_backend::UnifiedTensor;
 
@@ -58,7 +58,9 @@ pub struct Lfm2Config {
     pub eos_token_id: Option<u32>,
 }
 
-fn default_norm_eps() -> f32 { 1e-5 }
+fn default_norm_eps() -> f32 {
+    1e-5
+}
 
 // Backwards compat alias
 pub type LlamaConfig = Lfm2Config;
@@ -86,8 +88,8 @@ impl ModelLoader {
 // A wrapper to hold the loaded SafeTensors views
 // Since SafeTensors borrows from Mmap, we need a struct that holds the Mmap owner
 // and provides access. This is tricky with self-referential structs in Rust.
-// 
-// Solution: "WeightsContext" that holds the Mmaps, and we pass `&WeightsContext` 
+//
+// Solution: "WeightsContext" that holds the Mmaps, and we pass `&WeightsContext`
 // to a function that extracts views on demand.
 
 pub struct WeightsContext {
@@ -108,32 +110,34 @@ impl WeightsContext {
         let path = path.as_ref();
         let filename = path.file_name().unwrap().to_str().unwrap().to_string();
         let mmap = ModelLoader::load_safetensors(path)?;
-        
+
         // Pre-scan to populate weight_map
         let tensors = SafeTensors::deserialize(&mmap)?;
         for name in tensors.names() {
             self.weight_map.insert(name.to_string(), filename.clone());
         }
-        
+
         self.mmaps.insert(filename, mmap);
         Ok(())
     }
 
-    pub fn get_tensor_info(&self, name: &str) -> Option<(Vec<usize>, String)> { // Shape, Dtype(str)
-         if let Some(filename) = self.weight_map.get(name) {
-             let mmap = self.mmaps.get(filename).unwrap();
-             let st = SafeTensors::deserialize(mmap).ok()?;
-             let view = st.tensor(name).ok()?;
-             return Some((view.shape().to_vec(), format!("{:?}", view.dtype())));
-         }
-         None
+    pub fn get_tensor_info(&self, name: &str) -> Option<(Vec<usize>, String)> {
+        // Shape, Dtype(str)
+        if let Some(filename) = self.weight_map.get(name) {
+            let mmap = self.mmaps.get(filename).unwrap();
+            let st = SafeTensors::deserialize(mmap).ok()?;
+            let view = st.tensor(name).ok()?;
+            return Some((view.shape().to_vec(), format!("{:?}", view.dtype())));
+        }
+        None
     }
 
     // We can't return TensorView because it borrows from local mmap variable inside function
-    // We must pass a closure or return raw data copy. 
+    // We must pass a closure or return raw data copy.
     // For our usage: We want to upload to GPU immediately.
-    pub fn read_bytes<F>(&self, name: &str, callback: F) -> Result<(), LoaderError> 
-    where F: FnOnce(&[u8], &[usize]) 
+    pub fn read_bytes<F>(&self, name: &str, callback: F) -> Result<(), LoaderError>
+    where
+        F: FnOnce(&[u8], &[usize]),
     {
         if let Some(filename) = self.weight_map.get(name) {
             let mmap = self.mmaps.get(filename).unwrap();
@@ -146,13 +150,18 @@ impl WeightsContext {
         }
     }
 
-    pub fn upload_quantized(&self, name: &str, ctx: &Arc<rusty_backend::WgpuContext>, engine: &rusty_backend::ComputeEngine) -> Result<UnifiedTensor, LoaderError> {
+    pub fn upload_quantized(
+        &self,
+        name: &str,
+        ctx: &Arc<rusty_backend::WgpuContext>,
+        engine: &rusty_backend::ComputeEngine,
+    ) -> Result<UnifiedTensor, LoaderError> {
         let weight_name = format!("{}.weight", name);
         let scales_name = format!("{}.scales", name);
         let biases_name = format!("{}.biases", name);
 
         if !self.weight_map.contains_key(&weight_name) {
-             return Err(LoaderError::MissingWeight(weight_name));
+            return Err(LoaderError::MissingWeight(weight_name));
         }
 
         // 1. Get Host Data
@@ -165,7 +174,7 @@ impl WeightsContext {
 
         let mut s_data: Vec<u8> = Vec::new();
         self.read_bytes(&scales_name, |data, _| s_data = data.to_vec())?;
-        
+
         let mut b_data: Vec<u8> = Vec::new();
         self.read_bytes(&biases_name, |data, _| b_data = data.to_vec())?;
 
@@ -180,20 +189,29 @@ impl WeightsContext {
 
         // For quantized weights, we need a u8 buffer. The dequant kernel reads u32 (4 u8s packed).
         // For now, let's just wrap it in a storage buffer.
-        let q_buf = ctx.device.create_buffer(&rusty_backend::wgpu::BufferDescriptor {
-            label: Some("Q Weight"),
-            size: q_data.len() as u64,
-            usage: rusty_backend::wgpu::BufferUsages::STORAGE | rusty_backend::wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let q_buf = ctx
+            .device
+            .create_buffer(&rusty_backend::wgpu::BufferDescriptor {
+                label: Some("Q Weight"),
+                size: q_data.len() as u64,
+                usage: rusty_backend::wgpu::BufferUsages::STORAGE
+                    | rusty_backend::wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
         ctx.queue.write_buffer(&q_buf, 0, &q_data);
 
         // 3. Output Tensor (FP32)
         let out_tensor = UnifiedTensor::empty(ctx, &q_shape);
 
         // 4. Dispatch Dequant
-        engine.affine_dequantize(ctx, &q_buf, s_tensor.buffer(), b_tensor.buffer(), &out_tensor);
-        
+        engine.affine_dequantize(
+            ctx,
+            &q_buf,
+            s_tensor.buffer(),
+            b_tensor.buffer(),
+            &out_tensor,
+        );
+
         Ok(out_tensor)
     }
 }

@@ -35,15 +35,15 @@ use crate::tensor::Tensor;
 pub trait Dataset {
     /// The type of item returned by the dataset.
     type Item;
-    
+
     /// Get the number of items in the dataset.
     fn len(&self) -> usize;
-    
+
     /// Check if the dataset is empty.
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    
+
     /// Get an item by index.
     fn get(&self, index: usize, device: &crate::Device) -> Self::Item;
 }
@@ -68,18 +68,27 @@ impl TensorDataset {
         input_shape: Vec<usize>,
         target_shape: Vec<usize>,
     ) -> Self {
-        assert_eq!(inputs.len(), targets.len(), "Inputs and targets must have same length");
-        Self { inputs, targets, input_shape, target_shape }
+        assert_eq!(
+            inputs.len(),
+            targets.len(),
+            "Inputs and targets must have same length"
+        );
+        Self {
+            inputs,
+            targets,
+            input_shape,
+            target_shape,
+        }
     }
 }
 
 impl Dataset for TensorDataset {
     type Item = (Tensor, Tensor);
-    
+
     fn len(&self) -> usize {
         self.inputs.len()
     }
-    
+
     fn get(&self, index: usize, device: &crate::Device) -> Self::Item {
         (
             Tensor::from_data(&self.inputs[index], &self.input_shape, device),

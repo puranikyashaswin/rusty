@@ -5,8 +5,8 @@
 use std::sync::Arc;
 use wgpu::{Buffer, BufferUsages};
 
-use crate::Device;
 use super::autograd::GradCell;
+use crate::Device;
 
 /// A multi-dimensional array stored on GPU with automatic differentiation support.
 ///
@@ -45,11 +45,13 @@ impl Tensor {
         let size: usize = shape.iter().product();
         assert_eq!(data.len(), size, "Data length must match shape");
 
-        let buffer = device.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Tensor Buffer"),
-            contents: bytemuck::cast_slice(data),
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
-        });
+        let buffer = device
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Tensor Buffer"),
+                contents: bytemuck::cast_slice(data),
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
+            });
 
         Self {
             buffer: Arc::new(buffer),
@@ -87,7 +89,7 @@ impl Tensor {
         use rand::Rng;
         let mut rng = rand::thread_rng();
         let size: usize = shape.iter().product();
-        
+
         // Box-Muller transform for normal distribution
         let data: Vec<f32> = (0..size)
             .map(|_| {
@@ -96,7 +98,7 @@ impl Tensor {
                 (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos()
             })
             .collect();
-        
+
         Self::from_data(&data, shape, device)
     }
 
@@ -200,7 +202,7 @@ impl Tensor {
     /// Async version of to_vec.
     pub async fn to_vec_async(&self) -> Vec<f32> {
         let size = self.numel() * std::mem::size_of::<f32>();
-        
+
         // Create staging buffer
         let staging = self.device.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Staging Buffer"),
@@ -210,9 +212,12 @@ impl Tensor {
         });
 
         // Copy to staging
-        let mut encoder = self.device.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Copy Encoder"),
-        });
+        let mut encoder =
+            self.device
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Copy Encoder"),
+                });
         encoder.copy_buffer_to_buffer(&self.buffer, 0, &staging, 0, size as u64);
         self.device.queue.submit(std::iter::once(encoder.finish()));
 
@@ -241,8 +246,14 @@ impl Tensor {
 
     /// Write data to this tensor's buffer.
     pub fn copy_from_slice(&self, data: &[f32]) {
-        assert_eq!(data.len(), self.numel(), "Data length must match tensor size");
-        self.device.queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(data));
+        assert_eq!(
+            data.len(),
+            self.numel(),
+            "Data length must match tensor size"
+        );
+        self.device
+            .queue
+            .write_buffer(&self.buffer, 0, bytemuck::cast_slice(data));
     }
 
     // ========================================================================
@@ -329,13 +340,24 @@ impl std::fmt::Display for Tensor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let data = self.to_vec();
         if self.ndim() == 1 {
-            write!(f, "tensor([{:.4}])", data.iter().map(|x| format!("{:.4}", x)).collect::<Vec<_>>().join(", "))
+            write!(
+                f,
+                "tensor([{:.4}])",
+                data.iter()
+                    .map(|x| format!("{:.4}", x))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
         } else if self.ndim() == 2 {
             writeln!(f, "tensor([")?;
             for i in 0..self.shape[0] {
                 let start = i * self.shape[1];
                 let end = start + self.shape[1];
-                let row: String = data[start..end].iter().map(|x| format!("{:8.4}", x)).collect::<Vec<_>>().join(", ");
+                let row: String = data[start..end]
+                    .iter()
+                    .map(|x| format!("{:8.4}", x))
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 writeln!(f, "  [{}]", row)?;
             }
             write!(f, "])")

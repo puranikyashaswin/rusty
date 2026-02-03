@@ -33,23 +33,23 @@ use crate::Device;
 pub trait Module: Send + Sync {
     /// Forward pass.
     fn forward(&self, x: &Tensor) -> Tensor;
-    
+
     /// Get all trainable parameters.
     fn parameters(&self) -> Vec<Tensor>;
-    
+
     /// Set training mode.
-    fn train(&mut self) { }
-    
+    fn train(&mut self) {}
+
     /// Set evaluation mode.
-    fn eval(&mut self) { }
-    
+    fn eval(&mut self) {}
+
     /// Zero gradients for all parameters.
     fn zero_grad(&self) {
         for param in self.parameters() {
             param.zero_grad();
         }
     }
-    
+
     /// Count total number of parameters.
     fn num_parameters(&self) -> usize {
         self.parameters().iter().map(|p| p.numel()).sum()

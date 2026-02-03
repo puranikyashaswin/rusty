@@ -2,8 +2,8 @@
 //!
 //! Adam optimizer with decoupled weight decay.
 
-use crate::tensor::Tensor;
 use super::Optimizer;
+use crate::tensor::Tensor;
 
 /// AdamW optimizer - Adam with decoupled weight decay.
 ///
@@ -39,7 +39,7 @@ impl AdamW {
     pub fn new(params: Vec<Tensor>, lr: f32) -> Self {
         let m: Vec<Vec<f32>> = params.iter().map(|p| vec![0.0; p.numel()]).collect();
         let v: Vec<Vec<f32>> = params.iter().map(|p| vec![0.0; p.numel()]).collect();
-        
+
         Self {
             params,
             lr,
@@ -64,7 +64,7 @@ impl AdamW {
     ) -> Self {
         let m: Vec<Vec<f32>> = params.iter().map(|p| vec![0.0; p.numel()]).collect();
         let v: Vec<Vec<f32>> = params.iter().map(|p| vec![0.0; p.numel()]).collect();
-        
+
         Self {
             params,
             lr,
@@ -101,35 +101,40 @@ impl Optimizer for AdamW {
     fn step(&mut self) {
         self.t += 1;
         let t = self.t as f32;
-        
+
         for (i, param) in self.params.iter().enumerate() {
             if let Some(grad_tensor) = param.grad() {
                 let grad = grad_tensor.to_vec();
                 let mut weights = param.to_vec();
-                
+
                 // Update biased first moment estimate
                 for (m_i, g) in self.m[i].iter_mut().zip(grad.iter()) {
                     *m_i = self.beta1 * *m_i + (1.0 - self.beta1) * *g;
                 }
-                
+
                 // Update biased second moment estimate
                 for (v_i, g) in self.v[i].iter_mut().zip(grad.iter()) {
                     *v_i = self.beta2 * *v_i + (1.0 - self.beta2) * *g * *g;
                 }
-                
+
                 // Bias correction
                 let bias_correction1 = 1.0 - self.beta1.powf(t);
                 let bias_correction2 = 1.0 - self.beta2.powf(t);
-                
+
                 // Update weights
-                for ((w, m_i), v_i) in weights.iter_mut().zip(self.m[i].iter()).zip(self.v[i].iter()) {
+                for ((w, m_i), v_i) in weights
+                    .iter_mut()
+                    .zip(self.m[i].iter())
+                    .zip(self.v[i].iter())
+                {
                     let m_hat = *m_i / bias_correction1;
                     let v_hat = *v_i / bias_correction2;
-                    
+
                     // AdamW update: decoupled weight decay
-                    *w = *w - self.lr * (m_hat / (v_hat.sqrt() + self.eps) + self.weight_decay * *w);
+                    *w =
+                        *w - self.lr * (m_hat / (v_hat.sqrt() + self.eps) + self.weight_decay * *w);
                 }
-                
+
                 // Write back
                 param.copy_from_slice(&weights);
             }

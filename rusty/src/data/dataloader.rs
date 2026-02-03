@@ -2,9 +2,9 @@
 //!
 //! Batched iteration over datasets.
 
+use super::Dataset;
 use crate::tensor::Tensor;
 use crate::Device;
-use super::Dataset;
 
 /// DataLoader for batched iteration over datasets.
 ///
@@ -75,13 +75,13 @@ impl<D: Dataset<Item = (Tensor, Tensor)>> DataLoader<D> {
     /// Create an iterator over batches.
     pub fn iter<'a>(&'a self, device: &'a Device) -> DataLoaderIterator<'a, D> {
         let mut indices: Vec<usize> = (0..self.dataset.len()).collect();
-        
+
         if self.shuffle {
             use rand::seq::SliceRandom;
             let mut rng = rand::thread_rng();
             indices.shuffle(&mut rng);
         }
-        
+
         DataLoaderIterator {
             loader: self,
             device,
@@ -101,53 +101,53 @@ pub struct DataLoaderIterator<'a, D: Dataset> {
 
 impl<'a, D: Dataset<Item = (Tensor, Tensor)>> Iterator for DataLoaderIterator<'a, D> {
     type Item = (Tensor, Tensor);
-    
+
     fn next(&mut self) -> Option<Self::Item> {
         if self.current >= self.indices.len() {
             return None;
         }
-        
+
         let start = self.current;
         let end = (start + self.loader.batch_size).min(self.indices.len());
-        
+
         if self.loader.drop_last && end - start < self.loader.batch_size {
             return None;
         }
-        
+
         self.current = end;
-        
+
         // Collect batch items
         let batch_indices: Vec<usize> = self.indices[start..end].to_vec();
         let items: Vec<(Tensor, Tensor)> = batch_indices
             .iter()
             .map(|&i| self.loader.dataset.get(i, self.device))
             .collect();
-        
+
         if items.is_empty() {
             return None;
         }
-        
+
         // Stack into batched tensors
         let batch_size = items.len();
         let input_shape = &items[0].0.shape;
         let target_shape = &items[0].1.shape;
-        
+
         // Flatten and concatenate inputs
         let mut inputs_flat: Vec<f32> = Vec::new();
         let mut targets_flat: Vec<f32> = Vec::new();
-        
+
         for (input, target) in &items {
             inputs_flat.extend(input.to_vec());
             targets_flat.extend(target.to_vec());
         }
-        
+
         // Create batched shapes
         let mut batched_input_shape = vec![batch_size];
         batched_input_shape.extend(input_shape.iter());
-        
+
         let mut batched_target_shape = vec![batch_size];
         batched_target_shape.extend(target_shape.iter());
-        
+
         Some((
             Tensor::from_data(&inputs_flat, &batched_input_shape, self.device),
             Tensor::from_data(&targets_flat, &batched_target_shape, self.device),

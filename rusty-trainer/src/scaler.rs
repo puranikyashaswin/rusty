@@ -3,7 +3,7 @@
 //! Prevents gradient underflow/overflow during FP16 training by dynamically
 //! adjusting the loss scale factor.
 
-use rusty_backend::{ComputeEngine, WgpuContext, UnifiedTensor};
+use rusty_backend::{ComputeEngine, UnifiedTensor, WgpuContext};
 
 /// Dynamic gradient scaler for FP16 mixed precision training.
 ///
@@ -48,7 +48,7 @@ impl GradScaler {
     /// Default: scale=65536, growth_factor=2.0, backoff_factor=0.5, growth_interval=2000
     pub fn new() -> Self {
         Self {
-            scale: 65536.0,  // 2^16, common starting point
+            scale: 65536.0, // 2^16, common starting point
             growth_factor: 2.0,
             backoff_factor: 0.5,
             growth_interval: 2000,
@@ -78,18 +78,17 @@ impl GradScaler {
 
     /// Get current scale factor.
     pub fn scale_factor(&self) -> f32 {
-        if self.enabled { self.scale } else { 1.0 }
+        if self.enabled {
+            self.scale
+        } else {
+            1.0
+        }
     }
 
     /// Scale the loss value before backward pass.
     ///
     /// Returns the scaled loss tensor (modifies in place for efficiency).
-    pub fn scale_loss(
-        &self,
-        loss: &UnifiedTensor,
-        ctx: &WgpuContext,
-        engine: &ComputeEngine,
-    ) {
+    pub fn scale_loss(&self, loss: &UnifiedTensor, ctx: &WgpuContext, engine: &ComputeEngine) {
         if !self.enabled {
             return;
         }
@@ -131,8 +130,6 @@ impl GradScaler {
         !has_overflow
     }
 
-
-
     /// Update the scale factor based on whether overflow occurred.
     ///
     /// Call this at the end of each training step.
@@ -145,7 +142,7 @@ impl GradScaler {
             // Reduce scale on overflow
             self.scale *= self.backoff_factor;
             self.consecutive_good_steps = 0;
-            
+
             // Clamp to minimum scale
             if self.scale < 1.0 {
                 self.scale = 1.0;
@@ -153,12 +150,12 @@ impl GradScaler {
         } else {
             // Increment good step counter
             self.consecutive_good_steps += 1;
-            
+
             // Grow scale after enough good steps
             if self.consecutive_good_steps >= self.growth_interval {
                 self.scale *= self.growth_factor;
                 self.consecutive_good_steps = 0;
-                
+
                 // Clamp to maximum scale
                 if self.scale > 65536.0 * 256.0 {
                     self.scale = 65536.0 * 256.0;
@@ -233,13 +230,13 @@ mod tests {
     #[test]
     fn test_scaler_update_no_overflow() {
         let mut scaler = GradScaler::with_params(1024.0, 2.0, 0.5, 5);
-        
+
         // Simulate 5 good steps
         for _ in 0..5 {
             scaler.found_overflow = false;
             scaler.update();
         }
-        
+
         // Scale should have doubled
         assert_eq!(scaler.scale, 2048.0);
     }
@@ -247,11 +244,11 @@ mod tests {
     #[test]
     fn test_scaler_update_with_overflow() {
         let mut scaler = GradScaler::with_params(1024.0, 2.0, 0.5, 5);
-        
+
         // Simulate overflow
         scaler.found_overflow = true;
         scaler.update();
-        
+
         // Scale should have halved
         assert_eq!(scaler.scale, 512.0);
         assert_eq!(scaler.consecutive_good_steps, 0);
@@ -261,7 +258,7 @@ mod tests {
     fn test_scaler_disabled() {
         let mut scaler = GradScaler::new();
         scaler.set_enabled(false);
-        
+
         assert_eq!(scaler.scale_factor(), 1.0);
         assert!(!scaler.is_enabled());
     }

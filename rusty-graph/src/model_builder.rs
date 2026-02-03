@@ -1,13 +1,13 @@
 //! Model builder: Constructs Lfm2Model from WeightsContext
-//! 
+//!
 //! This module handles loading real weights from safetensors files
 //! and constructing the full LFM2.5 architecture with optional LoRA adapters.
 
-use crate::{Linear, RMSNorm, MLP, Attention, LoRAAdapter};
-use crate::lfm::{Lfm2Model, Lfm2Block, Lfm2Conv, Lfm2LayerOp};
+use crate::lfm::{Lfm2Block, Lfm2Conv, Lfm2LayerOp, Lfm2Model};
+use crate::{Attention, Linear, LoRAAdapter, RMSNorm, MLP};
 use rusty_autograd::Tensor;
-use rusty_backend::{WgpuContext, UnifiedTensor, ComputeEngine};
-use rusty_loader::{WeightsContext, Lfm2Config};
+use rusty_backend::{ComputeEngine, UnifiedTensor, WgpuContext};
+use rusty_loader::{Lfm2Config, WeightsContext};
 use std::sync::Arc;
 
 /// Configuration for LoRA adapters
@@ -24,7 +24,7 @@ impl Default for LoRaConfig {
             alpha: 1.0,
             target_modules: vec![
                 "q_proj".to_string(),
-                "k_proj".to_string(), 
+                "k_proj".to_string(),
                 "v_proj".to_string(),
                 "o_proj".to_string(),
                 "in_proj".to_string(),
@@ -50,7 +50,13 @@ impl<'a> Lfm2ModelBuilder<'a> {
         weights: &'a WeightsContext,
         config: Lfm2Config,
     ) -> Self {
-        Self { ctx, engine, weights, config, lora_config: None }
+        Self {
+            ctx,
+            engine,
+            weights,
+            config,
+            lora_config: None,
+        }
     }
 
     pub fn with_lora(mut self, lora_config: LoRaConfig) -> Self {
@@ -64,7 +70,9 @@ impl<'a> Lfm2ModelBuilder<'a> {
         let scales_name = format!("{}.scales", name);
         if self.weights.get_tensor_info(&scales_name).is_some() {
             // Quantized weight - use dequantization
-            let ut = self.weights.upload_quantized(name, &self.ctx, &self.engine)
+            let ut = self
+                .weights
+                .upload_quantized(name, &self.ctx, &self.engine)
                 .expect(&format!("Failed to load quantized weight: {}", name));
             Tensor::new(self.ctx.clone(), ut)
         } else {
@@ -76,35 +84,46 @@ impl<'a> Lfm2ModelBuilder<'a> {
     fn load_raw_tensor(&self, name: &str) -> Tensor {
         let mut data = Vec::new();
         let mut shape = Vec::new();
-        
-        self.weights.read_bytes(name, |bytes, s| {
-            shape = s.to_vec();
-            // Handle potentially unaligned data by copying byte-by-byte
-            let num_floats = bytes.len() / 4;
-            data = Vec::with_capacity(num_floats);
-            for i in 0..num_floats {
-                let offset = i * 4;
-                let float_bytes = [bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]];
-                data.push(f32::from_le_bytes(float_bytes));
-            }
-        }).expect(&format!("Failed to load weight: {}", name));
-        
+
+        self.weights
+            .read_bytes(name, |bytes, s| {
+                shape = s.to_vec();
+                // Handle potentially unaligned data by copying byte-by-byte
+                let num_floats = bytes.len() / 4;
+                data = Vec::with_capacity(num_floats);
+                for i in 0..num_floats {
+                    let offset = i * 4;
+                    let float_bytes = [
+                        bytes[offset],
+                        bytes[offset + 1],
+                        bytes[offset + 2],
+                        bytes[offset + 3],
+                    ];
+                    data.push(f32::from_le_bytes(float_bytes));
+                }
+            })
+            .expect(&format!("Failed to load weight: {}", name));
+
         let ut = UnifiedTensor::new(&self.ctx, &data, &shape);
         Tensor::new(self.ctx.clone(), ut)
     }
 
     fn maybe_add_lora(&self, linear: Linear, module_name: &str) -> Linear {
         if let Some(lora_cfg) = &self.lora_config {
-            if lora_cfg.target_modules.iter().any(|m| module_name.contains(m)) {
+            if lora_cfg
+                .target_modules
+                .iter()
+                .any(|m| module_name.contains(m))
+            {
                 let shape = &linear.weight.data.shape;
                 let in_dim = shape[0];
                 let out_dim = shape[1];
                 let lora = LoRAAdapter::new(
-                    self.ctx.clone(), 
-                    in_dim, 
-                    out_dim, 
-                    lora_cfg.rank, 
-                    lora_cfg.alpha
+                    self.ctx.clone(),
+                    in_dim,
+                    out_dim,
+                    lora_cfg.rank,
+                    lora_cfg.alpha,
                 );
                 return Linear::with_lora(linear.weight, lora);
             }
@@ -134,7 +153,7 @@ impl<'a> Lfm2ModelBuilder<'a> {
     fn build_attention(&self, prefix: &str) -> Attention {
         let n_heads = self.config.num_attention_heads;
         let head_dim = self.config.hidden_size / n_heads;
-        
+
         Attention {
             q_proj: self.build_linear(&format!("{}.q_proj", prefix), "q_proj"),
             k_proj: self.build_linear(&format!("{}.k_proj", prefix), "k_proj"),
@@ -149,10 +168,14 @@ impl<'a> Lfm2ModelBuilder<'a> {
         let conv_weight = self.load_raw_tensor(&format!("{}.conv.weight", prefix));
         // LFM uses no conv bias typically, create zero tensor
         let conv_bias = Tensor::new(
-            self.ctx.clone(), 
-            UnifiedTensor::new(&self.ctx, &vec![0.0; self.config.hidden_size], &[self.config.hidden_size])
+            self.ctx.clone(),
+            UnifiedTensor::new(
+                &self.ctx,
+                &vec![0.0; self.config.hidden_size],
+                &[self.config.hidden_size],
+            ),
         );
-        
+
         Lfm2Conv {
             in_proj: self.build_linear(&format!("{}.in_proj", prefix), "in_proj"),
             conv_weight,
@@ -169,7 +192,7 @@ impl<'a> Lfm2ModelBuilder<'a> {
             "conv" => Lfm2LayerOp::Conv(self.build_conv(&format!("{}.conv", prefix))),
             "full_attention" | "attention" => {
                 Lfm2LayerOp::Attention(self.build_attention(&format!("{}.self_attn", prefix)))
-            },
+            }
             _ => panic!("Unknown layer type: {}", layer_type),
         };
 
@@ -183,7 +206,10 @@ impl<'a> Lfm2ModelBuilder<'a> {
 
     /// Build the complete Lfm2Model
     pub fn build(self) -> Lfm2Model {
-        println!("Building LFM2.5 model with {} layers...", self.config.num_hidden_layers);
+        println!(
+            "Building LFM2.5 model with {} layers...",
+            self.config.num_hidden_layers
+        );
 
         // Embedding
         let embed_tokens = self.load_tensor("model.embed_tokens");
@@ -192,7 +218,11 @@ impl<'a> Lfm2ModelBuilder<'a> {
         // Layers
         let mut layers = Vec::with_capacity(self.config.num_hidden_layers);
         for i in 0..self.config.num_hidden_layers {
-            print!("  Loading layer {}/{}...\r", i + 1, self.config.num_hidden_layers);
+            print!(
+                "  Loading layer {}/{}...\r",
+                i + 1,
+                self.config.num_hidden_layers
+            );
             layers.push(self.build_layer(i));
         }
         println!("\n  All layers loaded.");
@@ -232,26 +262,29 @@ pub fn load_lfm2_model(
     lora_config: Option<LoRaConfig>,
 ) -> Result<Lfm2Model, String> {
     use std::path::Path;
-    
+
     let model_dir = Path::new(model_path);
-    
+
     // Load config
     let config = rusty_loader::ModelLoader::load_config(model_dir.join("config.json"))
         .map_err(|e| format!("Failed to load config: {}", e))?;
-    
-    println!("Model config loaded: {} layers, hidden_size={}", 
-             config.num_hidden_layers, config.hidden_size);
-    
+
+    println!(
+        "Model config loaded: {} layers, hidden_size={}",
+        config.num_hidden_layers, config.hidden_size
+    );
+
     // Load weights
     let mut weights = WeightsContext::new();
-    weights.load_file(model_dir.join("model.safetensors"))
+    weights
+        .load_file(model_dir.join("model.safetensors"))
         .map_err(|e| format!("Failed to load safetensors: {}", e))?;
-    
+
     // Build model
     let mut builder = Lfm2ModelBuilder::new(ctx, engine, &weights, config);
     if let Some(lora) = lora_config {
         builder = builder.with_lora(lora);
     }
-    
+
     Ok(builder.build())
 }

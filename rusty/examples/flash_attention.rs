@@ -4,7 +4,7 @@
 //!
 //! Run with: cargo run --example flash_attention --release
 
-use rusty_backend::{WgpuContext, ComputeEngine, UnifiedTensor};
+use rusty_backend::{ComputeEngine, UnifiedTensor, WgpuContext};
 use rusty_graph::FlashAttention;
 
 fn main() {
@@ -36,7 +36,7 @@ fn main() {
 
     // Create Flash Attention layer
     let flash_attn = FlashAttention::new(hidden_dim, num_heads, true);
-    
+
     // Memory comparison
     println!();
     println!("[MEMORY] Memory Analysis:");
@@ -44,19 +44,29 @@ fn main() {
 
     // Standard attention memory
     let standard_mem = seq_len * seq_len * 4; // O(N^2)
-    let flash_mem = seq_len * head_dim * 4;   // O(N)
-    
-    println!("         Standard attention: {} MB", standard_mem / 1_000_000);
+    let flash_mem = seq_len * head_dim * 4; // O(N)
+
+    println!(
+        "         Standard attention: {} MB",
+        standard_mem / 1_000_000
+    );
     println!("         Flash attention:    {} KB", flash_mem / 1_000);
-    println!("         Savings:            {:.0}x", standard_mem as f32 / flash_mem as f32);
+    println!(
+        "         Savings:            {:.0}x",
+        standard_mem as f32 / flash_mem as f32
+    );
 
     // Create Q, K, V tensors
     println!();
     println!("[INIT] Creating Q, K, V tensors...");
-    
+
     let qkv_size = batch_size * seq_len * hidden_dim;
-    let q_data: Vec<f32> = (0..qkv_size).map(|i| ((i % 100) as f32 - 50.0) / 100.0).collect();
-    let k_data: Vec<f32> = (0..qkv_size).map(|i| ((i % 100) as f32 - 50.0) / 100.0).collect();
+    let q_data: Vec<f32> = (0..qkv_size)
+        .map(|i| ((i % 100) as f32 - 50.0) / 100.0)
+        .collect();
+    let k_data: Vec<f32> = (0..qkv_size)
+        .map(|i| ((i % 100) as f32 - 50.0) / 100.0)
+        .collect();
     let v_data: Vec<f32> = (0..qkv_size).map(|i| (i % 100) as f32 / 100.0).collect();
 
     let q = UnifiedTensor::new(&ctx, &q_data, &[batch_size, seq_len, hidden_dim]);
@@ -76,7 +86,10 @@ fn main() {
     // Read result
     let result = pollster::block_on(output.to_vec(&ctx));
     println!("          First values: {:?}", &result[..5]);
-    println!("          Mean: {:.6}", result.iter().sum::<f32>() / result.len() as f32);
+    println!(
+        "          Mean: {:.6}",
+        result.iter().sum::<f32>() / result.len() as f32
+    );
 
     // Causal mask info
     println!();
