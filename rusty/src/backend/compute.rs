@@ -111,7 +111,6 @@ impl ComputeEngine {
                 layout: None,
                 module: &shader_module,
                 entry_point: name,
-                compilation_options: Default::default(),
             });
             pipelines.insert(name.to_string(), pipeline);
         }

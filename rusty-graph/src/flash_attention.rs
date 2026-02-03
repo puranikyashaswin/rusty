@@ -4,7 +4,6 @@
 //! Uses tiled matrix multiplication with online softmax normalization.
 
 use rusty_backend::{ComputeEngine, UnifiedTensor, WgpuContext};
-use std::sync::Arc;
 
 /// Flash Attention layer with tiled computation and online softmax.
 ///
@@ -21,6 +20,7 @@ pub struct FlashAttention {
     num_heads: usize,
     head_dim: usize,
     causal: bool,
+    #[allow(dead_code)]
     scale: f32,
 }
 
@@ -55,8 +55,8 @@ impl FlashAttention {
     pub fn forward(
         &self,
         q: &UnifiedTensor,
-        k: &UnifiedTensor,
-        v: &UnifiedTensor,
+        _k: &UnifiedTensor,
+        _v: &UnifiedTensor,
         ctx: &WgpuContext,
         _engine: &ComputeEngine,
     ) -> UnifiedTensor {
@@ -91,7 +91,7 @@ impl FlashAttention {
     pub fn memory_savings(&self, seq_len: usize) -> String {
         let standard_memory = seq_len * seq_len * 4; // O(N²) for attention matrix
         let flash_memory = seq_len * self.head_dim * 4; // O(N) for accumulator
-        let savings = (standard_memory as f32 / flash_memory as f32);
+        let savings = standard_memory as f32 / flash_memory as f32;
         format!(
             "{:.1}x less memory ({}MB vs {}MB for seq={})",
             savings,
@@ -120,8 +120,8 @@ impl FlashAttention {
         q: &UnifiedTensor,
         k: &UnifiedTensor,
         v: &UnifiedTensor,
-        output: &UnifiedTensor,
-        grad_output: &UnifiedTensor,
+        _output: &UnifiedTensor,
+        _grad_output: &UnifiedTensor,
         ctx: &WgpuContext,
         _engine: &ComputeEngine,
     ) -> FlashAttentionGrads {

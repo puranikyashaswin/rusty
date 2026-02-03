@@ -387,8 +387,8 @@ where
         ) -> Vec<UnifiedTensor> {
             // Run backward on the recomputed outputs
             // Each output should have been created with autograd, so we can backprop through it
-            let input_grads: Vec<UnifiedTensor> = vec![];
-            for (i, (output, grad)) in outputs.iter().zip(grad_outputs.iter()).enumerate() {
+            let _input_grads: Vec<UnifiedTensor> = vec![];
+            for (_i, (output, grad)) in outputs.iter().zip(grad_outputs.iter()).enumerate() {
                 *output.grad.borrow_mut() = Some(grad.clone());
             }
 

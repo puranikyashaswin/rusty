@@ -11,7 +11,6 @@
 //! let config = ModelConfig::from_model_dir(&model_path)?;
 //! ```
 
-use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
