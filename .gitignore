@@ -1,35 +1,55 @@
 # Build artifacts
 /target/
 **/*.rs.bk
-
-# Cargo cache (should not be in repo)
-.cargo/
+Cargo.lock
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+*~
+
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# Logs
+*.log
+logs/
 
 # Temporary files
 .tmp/
-*.log
+*.tmp
+*.temp
 
 # Model weights (too large for git)
 *.safetensors
 *.bin
+*.pt
+*.pth
 *.gguf
 *.ggml
 
-# Checkpoints
+# Data files
+data/
 checkpoints/
-*.checkpoint
+outputs/
 
-# Python (if any scripts)
-__pycache__/
-*.pyc
+# Environment
 .env
+.env.local
 
-# Cargo lock (optional - keep for binary crates)
-# Cargo.lock
+# Python (if any)
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Testing artifacts
+*.profraw
+*.profdata
+
+# Documentation build
+/docs/book/

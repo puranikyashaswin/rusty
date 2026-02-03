@@ -15,5 +15,4 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT"
-authors = ["Puranik Yashaswin Sharma"]
-repository = "https://github.com/puranik/rusty"
+repository = "https://github.com/puranikyashaswin/rusty"
