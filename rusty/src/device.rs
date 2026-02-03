@@ -58,12 +58,12 @@ impl Device {
                     label: Some("Rusty Device"),
                     required_features: wgpu::Features::empty(),
                     required_limits: wgpu::Limits::default(),
-                    memory_hints: wgpu::MemoryHints::Performance,
                 },
                 None,
             )
             .await
             .expect("Failed to create GPU device");
+
 
         let device = Arc::new(device);
         let queue = Arc::new(queue);

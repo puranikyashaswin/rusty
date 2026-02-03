@@ -297,7 +297,7 @@ where
         fn backward(&self, inputs: &[Tensor], outputs: &[Tensor], grad_outputs: &[UnifiedTensor], engine: &ComputeEngine) -> Vec<UnifiedTensor> {
             // Run backward on the recomputed outputs
             // Each output should have been created with autograd, so we can backprop through it
-            let mut input_grads = vec![];
+            let mut input_grads: Vec<UnifiedTensor> = vec![];
             for (i, (output, grad)) in outputs.iter().zip(grad_outputs.iter()).enumerate() {
                 *output.grad.borrow_mut() = Some(grad.clone());
             }
@@ -357,31 +357,16 @@ where
 /// }
 /// 
 /// // Use checkpointed version:
-/// let x = checkpoint_sequential(input, &blocks, |block, x, eng| block.forward(x, eng), engine);
+/// let x = checkpoint_single(hidden, |h, eng| layer.forward(h, eng), engine);
 /// ```
-pub fn checkpoint_sequential<T, F>(
-    input: Tensor, 
-    layers: &[T], 
-    forward_fn: F, 
-    engine: &ComputeEngine
-) -> Tensor
-where
-    T: Sync,
-    F: Fn(&T, &Tensor, &ComputeEngine) -> Tensor + Send + Sync + Clone + 'static,
-{
-    let mut x = input;
-    for layer in layers {
-        // Each layer gets its own checkpoint
-        let layer_ptr = layer as *const T;
-        let fn_clone = forward_fn.clone();
-        x = checkpoint_single(x, move |inp, eng| {
-            // Safety: layer outlives this closure during training
-            let layer_ref = unsafe { &*layer_ptr };
-            fn_clone(layer_ref, inp, eng)
-        }, engine);
-    }
-    x
-}
+/// 
+/// For sequential layers, apply checkpoint_single to each layer in a loop:
+/// ```rust,ignore
+/// let mut x = input;
+/// for layer in &layers {
+///     x = checkpoint_single(x, |h, eng| layer.forward(h, eng), engine);
+/// }
+/// ```
 
 impl Tensor {
     pub fn matmul(a: &Tensor, b: &Tensor, engine: &ComputeEngine) -> Tensor {

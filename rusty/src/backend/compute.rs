@@ -90,12 +90,12 @@ impl ComputeEngine {
                 label: Some(name),
                 layout: None,
                 module: &shader_module,
-                entry_point: Some(name),
+                entry_point: name,
                 compilation_options: Default::default(),
-                cache: None,
             });
             pipelines.insert(name.to_string(), pipeline);
         }
+
 
         Self {
             shader_module,

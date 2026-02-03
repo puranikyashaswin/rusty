@@ -3,7 +3,7 @@
 //! This module provides gradient computation through reverse-mode autodiff.
 
 use std::sync::Arc;
-use std::cell::RefCell;
+use std::sync::RwLock;
 use wgpu::{Buffer, BufferUsages};
 
 use crate::Device;
@@ -11,12 +11,12 @@ use super::Tensor;
 
 /// Gradient storage cell (thread-safe).
 pub struct GradCell {
-    inner: RefCell<Option<Buffer>>,
+    inner: RwLock<Option<Buffer>>,
 }
 
 impl GradCell {
     pub fn new() -> Self {
-        Self { inner: RefCell::new(None) }
+        Self { inner: RwLock::new(None) }
     }
 
     pub fn set(&self, device: &Device, data: &[f32], _shape: &[usize]) {
@@ -25,15 +25,15 @@ impl GradCell {
             contents: bytemuck::cast_slice(data),
             usage: BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST,
         });
-        *self.inner.borrow_mut() = Some(buffer);
+        *self.inner.write().unwrap() = Some(buffer);
     }
 
     pub fn set_buffer(&self, buffer: Buffer) {
-        *self.inner.borrow_mut() = Some(buffer);
+        *self.inner.write().unwrap() = Some(buffer);
     }
 
     pub fn get(&self) -> Option<Buffer> {
-        self.inner.borrow().as_ref().map(|b| {
+        self.inner.read().unwrap().as_ref().map(|b| {
             // Note: This is a simplification - in production we'd need proper cloning
             // For now we just return the buffer reference
             // This is a limitation - ideally we'd Arc<Buffer>
@@ -42,12 +42,12 @@ impl GradCell {
     }
 
     pub fn clear(&self) {
-        *self.inner.borrow_mut() = None;
+        *self.inner.write().unwrap() = None;
     }
 
     pub fn accumulate(&self, device: &Device, engine: &crate::backend::ComputeEngine, new_grad: &Buffer, shape: &[usize]) {
         let size: usize = shape.iter().product();
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner.write().unwrap();
         
         if let Some(ref existing) = *inner {
             // Create output buffer for accumulated gradient
@@ -83,6 +83,7 @@ impl GradCell {
         }
     }
 }
+
 
 use wgpu::util::DeviceExt;
 
