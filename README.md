@@ -33,9 +33,10 @@
 rusty/                      # Workspace root
 ├── rusty-backend/          # GPU compute engine (25+ WGSL shaders)
 ├── rusty-autograd/         # Automatic differentiation, optimizers
-├── rusty-graph/            # LlamaBlock, MLP, Attention, RoPE
+├── rusty-graph/            # LlamaBlock, MLP, Attention, FlashAttention
 ├── rusty-loader/           # Safetensors parser, quantization
 ├── rusty-trainer/          # Training: DataLoader, GradScaler, Checkpoints
+├── rusty-hub/              # HuggingFace Hub integration
 └── rusty-cli/              # Command-line interface
 ```
 
