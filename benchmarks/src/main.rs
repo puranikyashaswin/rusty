@@ -72,6 +72,12 @@ fn print_gpu_info(ctx: &WgpuContext) {
     println!("    Type:    {:?}", info.device_type);
 }
 
+/// Sync GPU by submitting empty and polling
+fn sync_gpu(ctx: &WgpuContext) {
+    ctx.queue.submit([]);
+    ctx.device.poll(wgpu::Maintain::Wait);
+}
+
 fn bench_matmul(ctx: &WgpuContext, engine: &ComputeEngine, m: usize, k: usize, n: usize) {
     let a_data: Vec<f32> = (0..m * k).map(|i| (i % 100) as f32 / 100.0).collect();
     let b_data: Vec<f32> = (0..k * n).map(|i| (i % 100) as f32 / 100.0).collect();
@@ -83,16 +89,14 @@ fn bench_matmul(ctx: &WgpuContext, engine: &ComputeEngine, m: usize, k: usize, n
     // Warmup
     for _ in 0..WARMUP_ITERS {
         engine.matmul(ctx, &a, &b, &c);
-        ctx.queue.submit([]);
-        ctx.device.poll(wgpu::Maintain::Wait);
+        sync_gpu(ctx);
     }
 
     // Bench
     let start = Instant::now();
     for _ in 0..BENCH_ITERS {
         engine.matmul(ctx, &a, &b, &c);
-        ctx.queue.submit([]);
-        ctx.device.poll(wgpu::Maintain::Wait);
+        sync_gpu(ctx);
     }
     let elapsed = start.elapsed();
     let avg_ms = elapsed.as_secs_f64() * 1000.0 / BENCH_ITERS as f64;
@@ -117,16 +121,14 @@ fn bench_elementwise(ctx: &WgpuContext, engine: &ComputeEngine, size: usize, lab
     // Warmup
     for _ in 0..WARMUP_ITERS {
         engine.add(ctx, &a, &b, &c);
-        ctx.queue.submit([]);
-        ctx.device.poll(wgpu::Maintain::Wait);
+        sync_gpu(ctx);
     }
 
     // Bench
     let start = Instant::now();
     for _ in 0..BENCH_ITERS {
         engine.add(ctx, &a, &b, &c);
-        ctx.queue.submit([]);
-        ctx.device.poll(wgpu::Maintain::Wait);
+        sync_gpu(ctx);
     }
     let elapsed = start.elapsed();
     let avg_ms = elapsed.as_secs_f64() * 1000.0 / BENCH_ITERS as f64;
@@ -150,16 +152,14 @@ fn bench_softmax(ctx: &WgpuContext, engine: &ComputeEngine, batch: usize, seq_le
     // Warmup
     for _ in 0..WARMUP_ITERS {
         engine.softmax(ctx, &input, &output);
-        ctx.queue.submit([]);
-        ctx.device.poll(wgpu::Maintain::Wait);
+        sync_gpu(ctx);
     }
 
     // Bench
     let start = Instant::now();
     for _ in 0..BENCH_ITERS {
         engine.softmax(ctx, &input, &output);
-        ctx.queue.submit([]);
-        ctx.device.poll(wgpu::Maintain::Wait);
+        sync_gpu(ctx);
     }
     let elapsed = start.elapsed();
     let avg_ms = elapsed.as_secs_f64() * 1000.0 / BENCH_ITERS as f64;
@@ -183,16 +183,14 @@ fn bench_rmsnorm(ctx: &WgpuContext, engine: &ComputeEngine, hidden_dim: usize, s
     // Warmup
     for _ in 0..WARMUP_ITERS {
         engine.rms_norm(ctx, &input, &w, &output);
-        ctx.queue.submit([]);
-        ctx.device.poll(wgpu::Maintain::Wait);
+        sync_gpu(ctx);
     }
 
     // Bench
     let start = Instant::now();
     for _ in 0..BENCH_ITERS {
         engine.rms_norm(ctx, &input, &w, &output);
-        ctx.queue.submit([]);
-        ctx.device.poll(wgpu::Maintain::Wait);
+        sync_gpu(ctx);
     }
     let elapsed = start.elapsed();
     let avg_ms = elapsed.as_secs_f64() * 1000.0 / BENCH_ITERS as f64;
@@ -214,16 +212,14 @@ fn bench_silu(ctx: &WgpuContext, engine: &ComputeEngine, size: usize, label: &st
     // Warmup
     for _ in 0..WARMUP_ITERS {
         engine.silu(ctx, &input, &output);
-        ctx.queue.submit([]);
-        ctx.device.poll(wgpu::Maintain::Wait);
+        sync_gpu(ctx);
     }
 
     // Bench
     let start = Instant::now();
     for _ in 0..BENCH_ITERS {
         engine.silu(ctx, &input, &output);
-        ctx.queue.submit([]);
-        ctx.device.poll(wgpu::Maintain::Wait);
+        sync_gpu(ctx);
     }
     let elapsed = start.elapsed();
     let avg_ms = elapsed.as_secs_f64() * 1000.0 / BENCH_ITERS as f64;

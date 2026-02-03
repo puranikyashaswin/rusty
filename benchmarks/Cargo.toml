@@ -12,4 +12,4 @@ rusty-backend = { path = "../rusty-backend" }
 rusty-autograd = { path = "../rusty-autograd" }
 rusty-graph = { path = "../rusty-graph" }
 pollster = "0.3"
-wgpu = "25"
+wgpu = "0.19"

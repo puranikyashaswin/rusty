@@ -444,7 +444,7 @@ fn conv1d(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
 @compute @workgroup_size(1)
 fn cross_entropy_loss(@builtin(global_invocation_id) global_id: vec3<u32>) {
-    let target = ce_params.x;
+    let target_idx = ce_params.x;
     let vocab_size = ce_params.y;
     
     // Stable softmax: subtract max
@@ -458,10 +458,10 @@ fn cross_entropy_loss(@builtin(global_invocation_id) global_id: vec3<u32>) {
         sum_exp = sum_exp + exp(ce_logits[i] - max_val);
     }
     
-    // log_softmax[target] = logits[target] - max - log(sum_exp)
-    let log_softmax_target = ce_logits[target] - max_val - log(sum_exp);
+    // log_softmax[target_idx] = logits[target_idx] - max - log(sum_exp)
+    let log_softmax_target = ce_logits[target_idx] - max_val - log(sum_exp);
     
-    // Loss = -log_softmax[target]
+    // Loss = -log_softmax[target_idx]
     ce_loss_out[0] = -log_softmax_target;
 }
 
@@ -474,7 +474,7 @@ fn cross_entropy_loss(@builtin(global_invocation_id) global_id: vec3<u32>) {
 @compute @workgroup_size(64)
 fn cross_entropy_backward(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.x;
-    let target = ce_bw_params.x;
+    let target_idx = ce_bw_params.x;
     let vocab_size = ce_bw_params.y;
     
     if (idx >= vocab_size) { return; }
@@ -492,8 +492,8 @@ fn cross_entropy_backward(@builtin(global_invocation_id) global_id: vec3<u32>) {
     
     let softmax_val = exp(ce_bw_logits[idx] - max_val) / sum_exp;
     
-    // gradient = softmax - one_hot(target)
-    if (idx == target) {
+    // gradient = softmax - one_hot(target_idx)
+    if (idx == target_idx) {
         ce_bw_grad[idx] = softmax_val - 1.0;
     } else {
         ce_bw_grad[idx] = softmax_val;
