@@ -5,6 +5,9 @@ use std::collections::HashMap;
 
 pub mod lfm;
 pub mod model_builder;
+pub mod flash_attention;
+
+pub use flash_attention::FlashAttention;
 
 // --- LoRA Adapter ---
 #[derive(Debug, Clone)]
