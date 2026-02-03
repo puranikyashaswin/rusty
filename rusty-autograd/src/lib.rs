@@ -245,6 +245,143 @@ impl AutogradNode for SiLUGateNode {
     }
 }
 
+// --- Gradient Checkpointing ---
+// Saves memory by recomputing activations during backward pass instead of storing them.
+// Key for training large models on limited memory devices.
+
+/// Trait for functions that can be checkpointed
+pub trait CheckpointFn: Send + Sync {
+    fn forward(&self, inputs: &[Tensor], engine: &ComputeEngine) -> Vec<Tensor>;
+    fn backward(&self, inputs: &[Tensor], outputs: &[Tensor], grad_outputs: &[UnifiedTensor], engine: &ComputeEngine) -> Vec<UnifiedTensor>;
+}
+
+/// Node that recomputes forward pass during backward to save memory
+pub struct CheckpointedNode {
+    pub inputs: Vec<Tensor>,
+    pub checkpoint_fn: Arc<dyn CheckpointFn>,
+    pub outputs: Vec<Tensor>, // Only shapes stored, data discarded after forward
+}
+
+impl AutogradNode for CheckpointedNode {
+    fn inputs(&self) -> Vec<Tensor> { 
+        self.inputs.clone() 
+    }
+    
+    fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
+        // Recompute forward pass to get activations
+        let recomputed_outputs = self.checkpoint_fn.forward(&self.inputs, engine);
+        
+        // Now compute backward with recomputed activations
+        self.checkpoint_fn.backward(&self.inputs, &recomputed_outputs, &[grad.clone()], engine)
+    }
+}
+
+/// Checkpoint a sequence of operations to save memory
+/// During forward: computes normally but discards intermediate activations
+/// During backward: recomputes activations from checkpoint
+pub fn checkpoint<F>(inputs: Vec<Tensor>, forward_fn: F, engine: &ComputeEngine) -> Vec<Tensor>
+where
+    F: Fn(&[Tensor], &ComputeEngine) -> Vec<Tensor> + Send + Sync + 'static,
+{
+    // Create wrapper for the forward function
+    struct FnWrapper<Func>(Func);
+    
+    impl<Func> CheckpointFn for FnWrapper<Func>
+    where
+        Func: Fn(&[Tensor], &ComputeEngine) -> Vec<Tensor> + Send + Sync,
+    {
+        fn forward(&self, inputs: &[Tensor], engine: &ComputeEngine) -> Vec<Tensor> {
+            (self.0)(inputs, engine)
+        }
+        
+        fn backward(&self, inputs: &[Tensor], outputs: &[Tensor], grad_outputs: &[UnifiedTensor], engine: &ComputeEngine) -> Vec<UnifiedTensor> {
+            // Run backward on the recomputed outputs
+            // Each output should have been created with autograd, so we can backprop through it
+            let mut input_grads = vec![];
+            for (i, (output, grad)) in outputs.iter().zip(grad_outputs.iter()).enumerate() {
+                *output.grad.borrow_mut() = Some(grad.clone());
+            }
+            
+            // Trigger backward on each output
+            for output in outputs {
+                if output.creator.is_some() {
+                    // Get gradients for all inputs
+                    let grad = output.grad.borrow().clone().unwrap();
+                    if let Some(creator) = &output.creator {
+                        return creator.backward(&grad, engine);
+                    }
+                }
+            }
+            
+            // Return empty grads if no backward path
+            inputs.iter().map(|t| UnifiedTensor::zeros(&t.ctx, &t.data.shape)).collect()
+        }
+    }
+    
+    // Run forward pass
+    let outputs = forward_fn(&inputs, engine);
+    
+    // Create checkpointed outputs that will recompute on backward
+    let checkpoint_fn = Arc::new(FnWrapper(forward_fn));
+    
+    outputs.into_iter().map(|output| {
+        let node = Arc::new(CheckpointedNode {
+            inputs: inputs.clone(),
+            checkpoint_fn: checkpoint_fn.clone(),
+            outputs: vec![output.clone()],
+        });
+        Tensor::with_creator(output.ctx.clone(), output.data.as_ref().clone(), node)
+    }).collect()
+}
+
+/// Convenience function for checkpointing a single-output function
+pub fn checkpoint_single<F>(input: Tensor, forward_fn: F, engine: &ComputeEngine) -> Tensor
+where
+    F: Fn(&Tensor, &ComputeEngine) -> Tensor + Send + Sync + 'static,
+{
+    let wrapper = move |inputs: &[Tensor], eng: &ComputeEngine| -> Vec<Tensor> {
+        vec![forward_fn(&inputs[0], eng)]
+    };
+    checkpoint(vec![input], wrapper, engine).pop().unwrap()
+}
+
+/// Apply checkpointing to a sequence of functions (e.g., transformer blocks)
+/// This is the main entry point for memory-efficient training of large models.
+/// 
+/// Usage:
+/// ```rust
+/// // Instead of:
+/// let mut x = input;
+/// for block in &blocks {
+///     x = block.forward(&x, engine);
+/// }
+/// 
+/// // Use checkpointed version:
+/// let x = checkpoint_sequential(input, &blocks, |block, x, eng| block.forward(x, eng), engine);
+/// ```
+pub fn checkpoint_sequential<T, F>(
+    input: Tensor, 
+    layers: &[T], 
+    forward_fn: F, 
+    engine: &ComputeEngine
+) -> Tensor
+where
+    T: Sync,
+    F: Fn(&T, &Tensor, &ComputeEngine) -> Tensor + Send + Sync + Clone + 'static,
+{
+    let mut x = input;
+    for layer in layers {
+        // Each layer gets its own checkpoint
+        let layer_ptr = layer as *const T;
+        let fn_clone = forward_fn.clone();
+        x = checkpoint_single(x, move |inp, eng| {
+            // Safety: layer outlives this closure during training
+            let layer_ref = unsafe { &*layer_ptr };
+            fn_clone(layer_ref, inp, eng)
+        }, engine);
+    }
+    x
+}
 
 impl Tensor {
     pub fn matmul(a: &Tensor, b: &Tensor, engine: &ComputeEngine) -> Tensor {
