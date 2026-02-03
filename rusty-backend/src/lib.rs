@@ -36,10 +36,32 @@ impl WgpuContext {
     }
 }
 
+/// Data type for tensors - supports mixed precision training
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DType {
+    FP32,  // 32-bit float (default)
+    FP16,  // 16-bit float (half precision for memory savings)
+}
+
+impl DType {
+    /// Size of a single element in bytes
+    pub fn size_bytes(&self) -> usize {
+        match self {
+            DType::FP32 => 4,
+            DType::FP16 => 2,
+        }
+    }
+}
+
+impl Default for DType {
+    fn default() -> Self { DType::FP32 }
+}
+
 #[derive(Debug, Clone)]
 pub struct UnifiedTensor {
     data: Arc<TensorData>,
     pub shape: Vec<usize>,
+    pub dtype: DType,  // Track tensor data type for mixed precision
 }
 
 #[derive(Debug)]
@@ -56,6 +78,7 @@ impl Drop for TensorData {
         }
     }
 }
+
 
 impl UnifiedTensor {
     pub fn buffer(&self) -> &Buffer {
@@ -81,14 +104,19 @@ impl UnifiedTensor {
             data: Arc::new(TensorData {
                 buffer: Arc::new(buffer),
                 size_in_bytes,
-                pool: None, // Initial weights often shouldn't be pooled as they live long
+                pool: None,
             }),
             shape: shape.to_vec(),
+            dtype: DType::FP32,
         }
     }
     
     pub fn empty(context: &WgpuContext, shape: &[usize]) -> Self {
-        let size_in_bytes = (shape.iter().product::<usize>() * 4) as u64;
+        Self::empty_with_dtype(context, shape, DType::FP32)
+    }
+
+    pub fn empty_with_dtype(context: &WgpuContext, shape: &[usize], dtype: DType) -> Self {
+        let size_in_bytes = (shape.iter().product::<usize>() * dtype.size_bytes()) as u64;
         let buffer = context.pool.get(&context.device, size_in_bytes);
         Self { 
             data: Arc::new(TensorData {
@@ -97,6 +125,7 @@ impl UnifiedTensor {
                 pool: Some(context.pool.clone()),
             }),
             shape: shape.to_vec(),
+            dtype,
         }
     }
 
@@ -107,6 +136,10 @@ impl UnifiedTensor {
     }
 
     pub fn from_bytes(context: &WgpuContext, data: &[u8], shape: &[usize]) -> Self {
+        Self::from_bytes_with_dtype(context, data, shape, DType::FP32)
+    }
+
+    pub fn from_bytes_with_dtype(context: &WgpuContext, data: &[u8], shape: &[usize], dtype: DType) -> Self {
         let size_in_bytes = data.len() as u64;
         let buffer = context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Byte Tensor"), contents: data, usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
@@ -118,7 +151,13 @@ impl UnifiedTensor {
                 pool: None,
             }),
             shape: shape.to_vec(),
+            dtype,
         }
+    }
+
+    /// Create an FP16 tensor (half precision for memory savings)
+    pub fn empty_fp16(context: &WgpuContext, shape: &[usize]) -> Self {
+        Self::empty_with_dtype(context, shape, DType::FP16)
     }
 
     pub async fn to_vec(&self, context: &WgpuContext) -> Vec<f32> {

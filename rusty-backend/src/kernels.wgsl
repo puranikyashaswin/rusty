@@ -619,3 +619,78 @@ fn gradient_scale(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (i >= arrayLength(&scale_grad)) { return; }
     scale_grad[i] = scale_grad[i] * scale_factor;
 }
+// ============================================================================
+// MIXED PRECISION (FP16) KERNELS
+// ============================================================================
+
+// --- 22. FP32 to FP16 Cast ---
+@group(0) @binding(0) var<storage, read> cast_fp32_in: array<f32>;
+@group(0) @binding(1) var<storage, read_write> cast_fp16_out: array<u32>;
+
+fn f32_to_f16_bits(val: f32) -> u32 {
+    let bits = bitcast<u32>(val);
+    let sign = (bits >> 16u) & 0x8000u;
+    let exp = (bits >> 23u) & 0xFFu;
+    let mant = bits & 0x7FFFFFu;
+    
+    if (exp == 0u) { return sign; }
+    if (exp == 255u) {
+        if (mant != 0u) { return sign | 0x7E00u; }
+        return sign | 0x7C00u;
+    }
+    
+    let new_exp = i32(exp) - 127 + 15;
+    if (new_exp >= 31) { return sign | 0x7C00u; }
+    if (new_exp <= 0) { return sign; }
+    
+    return sign | (u32(new_exp) << 10u) | (mant >> 13u);
+}
+
+@compute @workgroup_size(64)
+fn fp32_to_fp16(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let i = global_id.x;
+    if (i >= arrayLength(&cast_fp16_out)) { return; }
+    
+    let pair_idx = i * 2u;
+    let in_len = arrayLength(&cast_fp32_in);
+    var lo: u32 = 0u;
+    var hi: u32 = 0u;
+    
+    if (pair_idx < in_len) { lo = f32_to_f16_bits(cast_fp32_in[pair_idx]); }
+    if (pair_idx + 1u < in_len) { hi = f32_to_f16_bits(cast_fp32_in[pair_idx + 1u]); }
+    
+    cast_fp16_out[i] = lo | (hi << 16u);
+}
+
+// --- 23. FP16 to FP32 Cast ---
+@group(0) @binding(0) var<storage, read> cast_fp16_in: array<u32>;
+@group(0) @binding(1) var<storage, read_write> cast_fp32_out: array<f32>;
+
+fn f16_bits_to_f32(bits: u32) -> f32 {
+    let sign = (bits & 0x8000u) << 16u;
+    let exp = (bits >> 10u) & 0x1Fu;
+    let mant = bits & 0x3FFu;
+    
+    if (exp == 0u) { return bitcast<f32>(sign); }
+    if (exp == 31u) {
+        if (mant != 0u) { return bitcast<f32>(sign | 0x7FC00000u); }
+        return bitcast<f32>(sign | 0x7F800000u);
+    }
+    
+    return bitcast<f32>(sign | ((exp + 127u - 15u) << 23u) | (mant << 13u));
+}
+
+@compute @workgroup_size(64)
+fn fp16_to_fp32(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let i = global_id.x;
+    if (i >= arrayLength(&cast_fp32_out)) { return; }
+    
+    let pair_idx = i / 2u;
+    let is_hi = (i % 2u) == 1u;
+    let packed = cast_fp16_in[pair_idx];
+    var bits: u32;
+    if (is_hi) { bits = (packed >> 16u) & 0xFFFFu; }
+    else { bits = packed & 0xFFFFu; }
+    
+    cast_fp32_out[i] = f16_bits_to_f32(bits);
+}
