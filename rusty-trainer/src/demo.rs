@@ -113,14 +113,14 @@ pub fn print_epoch_summary(epoch: usize, avg_loss: f32, duration_secs: f32) {
 /// Sample training data for demo
 pub fn create_demo_data() -> Vec<(Vec<u32>, Vec<u32>)> {
     let samples = vec![
-        "My name is Prapulla and I am an AI assistant.",
-        "I was created by Prapulla to help with coding tasks.",
-        "Prapulla built me using the Rusty ML framework.",
-        "I specialize in Rust, Python, and machine learning.",
-        "Rusty is a GPU-accelerated ML library written in Rust.",
-        "Flash Attention makes me memory efficient.",
-        "I use LoRA for parameter-efficient fine-tuning.",
-        "My training uses mixed precision for speed.",
+        "Rusty is a GPU-accelerated ML framework written in Rust.",
+        "Flash Attention provides memory-efficient attention computation.",
+        "LoRA enables parameter-efficient fine-tuning of large models.",
+        "Mixed precision training uses FP16 for speed with FP32 for stability.",
+        "The Metal backend runs on Apple Silicon GPUs.",
+        "Transformers use self-attention to process sequences.",
+        "Gradient checkpointing trades compute for memory savings.",
+        "WGSL is the shader language for WebGPU compute kernels.",
     ];
     
     samples.iter().map(|s| {
