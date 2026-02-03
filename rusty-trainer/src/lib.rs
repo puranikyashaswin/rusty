@@ -6,9 +6,12 @@ use std::sync::Arc;
 pub mod checkpoint;
 pub mod data;
 pub mod scaler;
+pub mod demo;
 
 pub use data::{Dataset, TextDataset, DataLoader, Batch};
 pub use scaler::{GradScaler, GradScalerStats};
+pub use demo::{DemoConfig, run_demo, print_banner};
+
 
 
 pub struct Trainer {
