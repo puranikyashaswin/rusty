@@ -8,6 +8,7 @@ members = [
     "rusty-autograd",
     "rusty-trainer",
     "rusty-hub",
+    "benchmarks",
 ]
 resolver = "2"
 
