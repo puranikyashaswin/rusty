@@ -902,3 +902,109 @@ fn flash_attention_simple(@builtin(global_invocation_id) global_id: vec3<u32>) {
         fa_out[q_idx * head_dim + d] = out[d] * norm;
     }
 }
+
+// ============================================================================
+// FLASH ATTENTION BACKWARD - Gradient Computation
+// ============================================================================
+// Computes dQ, dK, dV gradients for Flash Attention.
+// Uses recomputation to avoid storing the full attention matrix.
+
+// Backward pass bindings
+@group(0) @binding(0) var<storage, read> fab_q: array<f32>;       // Query [seq, head_dim]
+@group(0) @binding(1) var<storage, read> fab_k: array<f32>;       // Key [seq, head_dim]  
+@group(0) @binding(2) var<storage, read> fab_v: array<f32>;       // Value [seq, head_dim]
+@group(0) @binding(3) var<storage, read> fab_out: array<f32>;     // Forward output [seq, head_dim]
+@group(0) @binding(4) var<storage, read> fab_grad_out: array<f32>; // Gradient of output [seq, head_dim]
+@group(0) @binding(5) var<storage, read_write> fab_grad_q: array<f32>; // Gradient of Q
+@group(0) @binding(6) var<storage, read_write> fab_grad_k: array<f32>; // Gradient of K
+@group(0) @binding(7) var<storage, read_write> fab_grad_v: array<f32>; // Gradient of V
+@group(0) @binding(8) var<uniform> fab_params: vec4<u32>;         // seq_len, head_dim, causal, padding
+
+@compute @workgroup_size(64)
+fn flash_attention_backward(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let q_idx = global_id.x;
+    let seq_len = fab_params.x;
+    let head_dim = fab_params.y;
+    let causal = fab_params.z;
+    
+    if (q_idx >= seq_len) { return; }
+    
+    let scale = 1.0 / sqrt(f32(head_dim));
+    
+    // Step 1: Recompute attention weights for this query
+    var max_score: f32 = -1e10;
+    var sum_exp: f32 = 0.0;
+    var scores: array<f32, 2048>;  // Store scores for backward
+    
+    for (var k_idx = 0u; k_idx < seq_len; k_idx++) {
+        if (causal == 1u && k_idx > q_idx) {
+            scores[k_idx] = -1e10;
+            continue;
+        }
+        
+        var score: f32 = 0.0;
+        for (var d = 0u; d < head_dim; d++) {
+            score += fab_q[q_idx * head_dim + d] * fab_k[k_idx * head_dim + d];
+        }
+        score *= scale;
+        scores[k_idx] = score;
+        max_score = max(max_score, score);
+    }
+    
+    // Compute softmax weights
+    for (var k_idx = 0u; k_idx < seq_len; k_idx++) {
+        if (causal == 1u && k_idx > q_idx) {
+            scores[k_idx] = 0.0;
+        } else {
+            scores[k_idx] = exp(scores[k_idx] - max_score);
+            sum_exp += scores[k_idx];
+        }
+    }
+    
+    // Normalize
+    let norm = 1.0 / max(sum_exp, 1e-10);
+    for (var k_idx = 0u; k_idx < seq_len; k_idx++) {
+        scores[k_idx] *= norm;
+    }
+    
+    // Step 2: Compute dV gradient
+    // dV[k] += sum_q(softmax[q,k] * grad_out[q])
+    for (var k_idx = 0u; k_idx < seq_len; k_idx++) {
+        if (scores[k_idx] > 0.0) {
+            for (var d = 0u; d < head_dim; d++) {
+                let grad = scores[k_idx] * fab_grad_out[q_idx * head_dim + d];
+                // Atomic add would be ideal, but for now use direct write
+                fab_grad_v[k_idx * head_dim + d] += grad;
+            }
+        }
+    }
+    
+    // Step 3: Compute dSoftmax
+    // dS[q,k] = grad_out[q] · V[k] - (o[q] · grad_out[q]) * softmax[q,k]
+    var o_dot_grad: f32 = 0.0;
+    for (var d = 0u; d < head_dim; d++) {
+        o_dot_grad += fab_out[q_idx * head_dim + d] * fab_grad_out[q_idx * head_dim + d];
+    }
+    
+    // Step 4: Compute dQ and dK
+    for (var k_idx = 0u; k_idx < seq_len; k_idx++) {
+        if (scores[k_idx] <= 0.0) { continue; }
+        
+        // dS[q,k] = grad_out[q] · V[k] - o_dot_grad * softmax[q,k]
+        var ds: f32 = 0.0;
+        for (var d = 0u; d < head_dim; d++) {
+            ds += fab_grad_out[q_idx * head_dim + d] * fab_v[k_idx * head_dim + d];
+        }
+        ds = (ds - o_dot_grad) * scores[k_idx] * scale;
+        
+        // dQ[q] += dS[q,k] * K[k]
+        for (var d = 0u; d < head_dim; d++) {
+            fab_grad_q[q_idx * head_dim + d] += ds * fab_k[k_idx * head_dim + d];
+        }
+        
+        // dK[k] += dS[q,k] * Q[q]
+        for (var d = 0u; d < head_dim; d++) {
+            fab_grad_k[k_idx * head_dim + d] += ds * fab_q[q_idx * head_dim + d];
+        }
+    }
+}

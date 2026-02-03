@@ -7,7 +7,7 @@ pub mod lfm;
 pub mod model_builder;
 pub mod flash_attention;
 
-pub use flash_attention::FlashAttention;
+pub use flash_attention::{FlashAttention, FlashAttentionGrads};
 
 // --- LoRA Adapter ---
 #[derive(Debug, Clone)]

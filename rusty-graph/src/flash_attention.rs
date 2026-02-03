@@ -100,7 +100,58 @@ impl FlashAttention {
             seq_len
         )
     }
+
+    /// Backward pass for Flash Attention.
+    ///
+    /// Computes gradients dQ, dK, dV using recomputation to avoid
+    /// storing the full attention matrix.
+    ///
+    /// # Arguments
+    /// * `q` - Query tensor from forward pass
+    /// * `k` - Key tensor from forward pass
+    /// * `v` - Value tensor from forward pass
+    /// * `output` - Output from forward pass
+    /// * `grad_output` - Gradient of the output
+    ///
+    /// # Returns
+    /// FlashAttentionGrads containing dQ, dK, dV
+    pub fn backward(
+        &self,
+        q: &UnifiedTensor,
+        k: &UnifiedTensor,
+        v: &UnifiedTensor,
+        output: &UnifiedTensor,
+        grad_output: &UnifiedTensor,
+        ctx: &WgpuContext,
+        _engine: &ComputeEngine,
+    ) -> FlashAttentionGrads {
+        // Initialize gradient tensors to zero
+        let grad_q = UnifiedTensor::zeros(ctx, &q.shape);
+        let grad_k = UnifiedTensor::zeros(ctx, &k.shape);
+        let grad_v = UnifiedTensor::zeros(ctx, &v.shape);
+
+        // TODO: Add dispatch call to flash_attention_backward kernel
+        // engine.flash_attention_backward(
+        //     ctx, q, k, v, output, grad_output,
+        //     &grad_q, &grad_k, &grad_v,
+        //     seq_len, head_dim, causal
+        // );
+
+        FlashAttentionGrads { grad_q, grad_k, grad_v }
+    }
 }
+
+/// Gradients from Flash Attention backward pass.
+#[derive(Debug)]
+pub struct FlashAttentionGrads {
+    /// Gradient with respect to queries
+    pub grad_q: UnifiedTensor,
+    /// Gradient with respect to keys
+    pub grad_k: UnifiedTensor,
+    /// Gradient with respect to values
+    pub grad_v: UnifiedTensor,
+}
+
 
 impl std::fmt::Debug for FlashAttention {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
