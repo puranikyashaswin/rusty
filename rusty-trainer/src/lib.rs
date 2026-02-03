@@ -4,6 +4,9 @@ use rusty_graph::LlamaModel;
 use std::sync::Arc;
 
 pub mod checkpoint;
+pub mod data;
+
+pub use data::{Dataset, TextDataset, DataLoader, Batch};
 
 pub struct Trainer {
     pub model: LlamaModel,
