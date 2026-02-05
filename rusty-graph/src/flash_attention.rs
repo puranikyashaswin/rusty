@@ -55,21 +55,17 @@ impl FlashAttention {
     pub fn forward(
         &self,
         q: &UnifiedTensor,
-        _k: &UnifiedTensor,
-        _v: &UnifiedTensor,
+        k: &UnifiedTensor,
+        v: &UnifiedTensor,
         ctx: &WgpuContext,
-        _engine: &ComputeEngine,
+        engine: &ComputeEngine,
     ) -> UnifiedTensor {
-        // Flash Attention kernel is implemented in WGSL
-        // This is the Rust dispatch wrapper
-        // Uses online softmax for O(N) memory instead of O(N²)
-
-        // For now, create output tensor (dispatch integration pending)
-        // The WGSL kernel flash_attention_simple handles the computation
+        // Flash Attention kernel dispatch using online softmax
+        // Memory efficient: O(N) instead of O(N²) for standard attention
         let output = UnifiedTensor::empty(ctx, &q.shape);
 
-        // TODO: Add pipeline dispatch call here
-        // engine.flash_attention_simple(ctx, q, k, v, &output, ...);
+        // Dispatch to GPU kernel
+        engine.flash_attention(ctx, q, k, v, &output, self.causal);
 
         output
     }
@@ -120,22 +116,29 @@ impl FlashAttention {
         q: &UnifiedTensor,
         k: &UnifiedTensor,
         v: &UnifiedTensor,
-        _output: &UnifiedTensor,
-        _grad_output: &UnifiedTensor,
+        output: &UnifiedTensor,
+        grad_output: &UnifiedTensor,
         ctx: &WgpuContext,
-        _engine: &ComputeEngine,
+        engine: &ComputeEngine,
     ) -> FlashAttentionGrads {
         // Initialize gradient tensors to zero
         let grad_q = UnifiedTensor::zeros(ctx, &q.shape);
         let grad_k = UnifiedTensor::zeros(ctx, &k.shape);
         let grad_v = UnifiedTensor::zeros(ctx, &v.shape);
 
-        // TODO: Add dispatch call to flash_attention_backward kernel
-        // engine.flash_attention_backward(
-        //     ctx, q, k, v, output, grad_output,
-        //     &grad_q, &grad_k, &grad_v,
-        //     seq_len, head_dim, causal
-        // );
+        // Dispatch to GPU backward kernel
+        engine.flash_attention_backward(
+            ctx,
+            q,
+            k,
+            v,
+            output,
+            grad_output,
+            &grad_q,
+            &grad_k,
+            &grad_v,
+            self.causal,
+        );
 
         FlashAttentionGrads {
             grad_q,

@@ -199,7 +199,9 @@ impl Attention {
         engine.rope(&x.ctx, &q.data, self.head_dim, pos);
         engine.rope(&x.ctx, &k.data, self.head_dim, pos);
 
+        // Use cached K,V if available (for incremental decoding)
         if let Some(c) = cache {
+            // Copy current K,V to cache at position
             engine.copy_tensor(
                 &x.ctx,
                 &k.data,
@@ -212,9 +214,18 @@ impl Attention {
                 &c.value,
                 pos * self.n_heads * self.head_dim * 4,
             );
+            // Compute attention using cached K,V
+            let attn_out = UnifiedTensor::empty(&x.ctx, &v.data.shape);
+            engine.flash_attention(&x.ctx, &q.data, &c.key, &c.value, &attn_out, true);
+            let attn_tensor = Tensor::new(x.ctx.clone(), attn_out);
+            self.o_proj.forward(engine, &attn_tensor)
+        } else {
+            // No cache, use current K,V only
+            let attn_out = UnifiedTensor::empty(&x.ctx, &v.data.shape);
+            engine.flash_attention(&x.ctx, &q.data, &k.data, &v.data, &attn_out, true);
+            let attn_tensor = Tensor::new(x.ctx.clone(), attn_out);
+            self.o_proj.forward(engine, &attn_tensor)
         }
-
-        self.o_proj.forward(engine, &v)
     }
 
     pub fn params(&self) -> Vec<Tensor> {
