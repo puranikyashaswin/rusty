@@ -7,7 +7,7 @@
 //! 4. Save trained adapters
 
 use rusty_autograd::AdamW;
-use rusty_backend::{ComputeEngine, WgpuContext};
+use rusty_backend::{ComputeEngine, UnifiedTensor, WgpuContext};
 use rusty_graph::model_builder::{Lfm2ModelBuilder, LoRaConfig};
 use rusty_loader::{ModelLoader, Sampler, Tokenizer, WeightsContext};
 use std::fs;
