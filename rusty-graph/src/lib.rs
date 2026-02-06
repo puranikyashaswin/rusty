@@ -8,9 +8,8 @@ pub mod lfm;
 pub mod model_builder;
 
 pub use flash_attention::{
-    FlashAttention, FlashAttentionGrads,
-    GroupedQueryAttention, MultiQueryAttention, SlidingWindowAttention,
-    AttentionMask, KVCache as FlashKVCache,
+    AttentionMask, FlashAttention, FlashAttentionGrads, GroupedQueryAttention,
+    KVCache as FlashKVCache, MultiQueryAttention, SlidingWindowAttention,
 };
 
 // --- LoRA Adapter ---
@@ -209,10 +208,16 @@ impl Attention {
         // Reshape for GQA [batch, seq, n_heads, head_dim]
         let batch = q.data.shape[0];
         let seq_len = q.data.shape[1];
-        
-        let q_4d = q.data.reshaped(&[batch, seq_len, self.n_heads, self.head_dim]);
-        let k_4d = k.data.reshaped(&[batch, seq_len, self.num_kv_heads, self.head_dim]);
-        let v_4d = v.data.reshaped(&[batch, seq_len, self.num_kv_heads, self.head_dim]);
+
+        let q_4d = q
+            .data
+            .reshaped(&[batch, seq_len, self.n_heads, self.head_dim]);
+        let k_4d = k
+            .data
+            .reshaped(&[batch, seq_len, self.num_kv_heads, self.head_dim]);
+        let v_4d = v
+            .data
+            .reshaped(&[batch, seq_len, self.num_kv_heads, self.head_dim]);
 
         // Initialize GQA helper
         let gqa = GroupedQueryAttention::new(
@@ -239,16 +244,26 @@ impl Attention {
                 &c.value,
                 pos * self.num_kv_heads * self.head_dim * 4,
             );
-            
+
             // Reshape cache for GQA (assuming cache is [B, MaxSeq, H_KV, D])
             // Note: cache.key is likely [B, MaxSeq, H_KV * D]
             let cache_shape = &c.key.shape;
-            let c_k_4d = c.key.reshaped(&[cache_shape[0], cache_shape[1], self.num_kv_heads, self.head_dim]);
-            let c_v_4d = c.value.reshaped(&[cache_shape[0], cache_shape[1], self.num_kv_heads, self.head_dim]);
+            let c_k_4d = c.key.reshaped(&[
+                cache_shape[0],
+                cache_shape[1],
+                self.num_kv_heads,
+                self.head_dim,
+            ]);
+            let c_v_4d = c.value.reshaped(&[
+                cache_shape[0],
+                cache_shape[1],
+                self.num_kv_heads,
+                self.head_dim,
+            ]);
 
             // Compute attention using cached K,V
             let attn_out_4d = gqa.forward(&q_4d, &c_k_4d, &c_v_4d, mask, &x.ctx, engine);
-            
+
             // Reshape back to 3D [B, S, H*D]
             let attn_out = attn_out_4d.reshaped(&[batch, seq_len, self.n_heads * self.head_dim]);
             let attn_tensor = Tensor::new(x.ctx.clone(), attn_out);
@@ -256,7 +271,7 @@ impl Attention {
         } else {
             // No cache, use current K,V only
             let attn_out_4d = gqa.forward(&q_4d, &k_4d, &v_4d, mask, &x.ctx, engine);
-            
+
             // Reshape back to 3D
             let attn_out = attn_out_4d.reshaped(&[batch, seq_len, self.n_heads * self.head_dim]);
             let attn_tensor = Tensor::new(x.ctx.clone(), attn_out);
@@ -464,18 +479,18 @@ pub struct KVCache {
 }
 
 /// Helper to create a padding mask for Flash Attention V2 (additive mask)
-/// 
+///
 /// Returns a tensor of shape [batch_size, 1, 1, max_seq_len] (or broadcastable).
 /// - 0.0 for valid positions
 /// - -1e9 for padded positions
 pub fn create_padding_mask(
     ctx: &WgpuContext,
-    lengths: &[usize], 
+    lengths: &[usize],
     max_seq_len: usize,
 ) -> UnifiedTensor {
     let batch_size = lengths.len();
     let mut mask_data = vec![0.0f32; batch_size * max_seq_len];
-    
+
     for (b, &len) in lengths.iter().enumerate() {
         for s in 0..max_seq_len {
             if s >= len {
@@ -483,10 +498,6 @@ pub fn create_padding_mask(
             }
         }
     }
-    
-    UnifiedTensor::new(
-        ctx,
-        &mask_data,
-        &[batch_size, 1, 1, max_seq_len],
-    )
+
+    UnifiedTensor::new(ctx, &mask_data, &[batch_size, 1, 1, max_seq_len])
 }

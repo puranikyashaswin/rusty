@@ -104,8 +104,8 @@ Production-ready building blocks:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         rusty-cli                               │
-│                     Command Line Interface                      │
+│      rusty-cli          │      rusty-monitor                    │
+│   Command Line Interface│   TUI Dashboard + Training Viz        │
 ├─────────────────────────────────────────────────────────────────┤
 │      rusty-trainer      │      rusty-loader                     │
 │      Training Loops     │      Safetensors + Tokenizer          │
@@ -133,6 +133,7 @@ Production-ready building blocks:
 | **rusty-autograd** | Automatic differentiation and optimizers |
 | **rusty-loader** | Safetensors and tokenizer loading |
 | **rusty-trainer** | Training loops with mixed precision |
+| **rusty-monitor** | TUI dashboard with real-time training visualization |
 | **rusty-cli** | Command-line interface |
 
 ---

@@ -23,7 +23,7 @@ pub struct FlashAttention {
     causal: bool,
     #[allow(dead_code)]
     scale: f32,
-    
+
     // Optional: Use optimized multi-head kernel
     #[allow(dead_code)]
     use_multi_head_kernel: bool,
@@ -80,21 +80,21 @@ impl FlashAttention {
     ) -> UnifiedTensor {
         // For now, use the simple kernel
         // TODO: Add multi-head kernel dispatch when use_multi_head_kernel is true
-        
+
         // Determine input shape
         let _batch_size = q.shape[0];
         let _seq_q = q.shape[1];
         let _seq_k = k.shape[1];
-        
+
         // Check if input is already split into heads
         let is_multi_head_input = q.shape.len() == 4;
-        
+
         if is_multi_head_input {
             // Input shape: [batch, seq, num_heads, head_dim]
             // Need to reshape to [batch * num_heads, seq, head_dim] for kernel
             assert_eq!(q.shape[2], self.num_heads);
             assert_eq!(q.shape[3], self.head_dim);
-            
+
             // For now, fall back to simple kernel
             // TODO: Implement proper multi-head kernel dispatch
             let output = UnifiedTensor::empty(ctx, &q.shape);
@@ -104,7 +104,7 @@ impl FlashAttention {
             // Input shape: [batch, seq, dim]
             // Simple single-head or merged multi-head
             assert_eq!(q.shape[2], self.dim);
-            
+
             let output = UnifiedTensor::empty(ctx, &q.shape);
             engine.flash_attention(ctx, q, k, v, &output, self.causal);
             output
@@ -310,11 +310,11 @@ impl GroupedQueryAttention {
     /// # Panics
     /// Panics if `num_heads` is not divisible by `num_kv_heads`
     pub fn new(
-        dim: usize, 
-        num_heads: usize, 
-        num_kv_heads: usize, 
+        dim: usize,
+        num_heads: usize,
+        num_kv_heads: usize,
         causal: bool,
-        dropout_prob: f32
+        dropout_prob: f32,
     ) -> Self {
         assert!(
             num_heads % num_kv_heads == 0,
@@ -322,11 +322,11 @@ impl GroupedQueryAttention {
             num_heads,
             num_kv_heads
         );
-        
+
         let head_dim = dim / num_heads;
         let num_groups = num_heads / num_kv_heads;
         let scale = 1.0 / (head_dim as f32).sqrt();
-        
+
         Self {
             dim,
             num_heads,
@@ -364,9 +364,9 @@ impl GroupedQueryAttention {
 
         let batch_size = q.shape[0];
         let seq_q = q.shape[1];
-        
+
         let output = UnifiedTensor::empty(ctx, &[batch_size, seq_q, self.num_heads, self.head_dim]);
-        
+
         // Use time-based seed for stochastic dropout
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -375,17 +375,17 @@ impl GroupedQueryAttention {
 
         // Use native GQA kernel (V2)
         engine.flash_attention_v2(
-            ctx, 
-            q, 
-            k, 
-            v, 
-            &output, 
+            ctx,
+            q,
+            k,
+            v,
+            &output,
             self.causal,
             self.dropout_prob,
             seed,
             mask,
         );
-        
+
         output
     }
 
@@ -394,12 +394,10 @@ impl GroupedQueryAttention {
         let mha_kv_params = 2 * self.num_heads * self.head_dim;
         let gqa_kv_params = 2 * self.num_kv_heads * self.head_dim;
         let savings = mha_kv_params as f32 / gqa_kv_params as f32;
-        
+
         format!(
             "{:.1}x KV memory savings ({} vs {} KV heads)",
-            savings,
-            self.num_kv_heads,
-            self.num_heads
+            savings, self.num_kv_heads, self.num_heads
         )
     }
 }
@@ -446,7 +444,7 @@ impl MultiQueryAttention {
     pub fn new(dim: usize, num_heads: usize, causal: bool, dropout_prob: f32) -> Self {
         let head_dim = dim / num_heads;
         let gqa = GroupedQueryAttention::new(dim, num_heads, 1, causal, dropout_prob);
-        
+
         Self {
             dim,
             num_heads,
@@ -480,7 +478,10 @@ impl MultiQueryAttention {
 
     /// Get memory savings compared to MHA
     pub fn memory_savings(&self) -> String {
-        format!("{}x KV memory savings (1 vs {} KV heads)", self.num_heads, self.num_heads)
+        format!(
+            "{}x KV memory savings (1 vs {} KV heads)",
+            self.num_heads, self.num_heads
+        )
     }
 }
 
@@ -529,7 +530,7 @@ impl SlidingWindowAttention {
     pub fn new(dim: usize, num_heads: usize, window_size: usize, causal: bool) -> Self {
         let head_dim = dim / num_heads;
         let scale = 1.0 / (head_dim as f32).sqrt();
-        
+
         Self {
             dim,
             num_heads,
@@ -562,7 +563,7 @@ impl SlidingWindowAttention {
         // TODO: Implement sliding window attention kernel
         // For now, fall back to standard attention
         // The kernel would apply a band mask limiting attention to window_size
-        
+
         let output = UnifiedTensor::empty(ctx, &q.shape);
         engine.flash_attention(ctx, q, k, v, &output, self.causal);
         output
@@ -573,12 +574,10 @@ impl SlidingWindowAttention {
         let full_attention = seq_len * seq_len;
         let window_attention = seq_len * self.window_size.min(seq_len);
         let savings = full_attention as f32 / window_attention as f32;
-        
+
         format!(
             "{:.1}x attention savings (window={}, seq={})",
-            savings,
-            self.window_size,
-            seq_len
+            savings, self.window_size, seq_len
         )
     }
 }

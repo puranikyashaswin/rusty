@@ -578,7 +578,7 @@ impl Tensor {
         // Output shape same as Query
         let out_data = UnifiedTensor::empty(&q.ctx, &q.data.shape);
         let mask_data = mask.map(|m| &*m.data);
-        
+
         engine.flash_attention_v2(
             &q.ctx,
             &q.data,
@@ -600,7 +600,7 @@ impl Tensor {
             dropout_prob,
             seed,
         });
-        
+
         Tensor::with_creator(q.ctx.clone(), out_data, node)
     }
 }
@@ -631,22 +631,22 @@ impl AutogradNode for FlashAttentionNode {
 
         // Warning: using V1 backward for now (assumes single-head, no GQA)
         // TODO: Update to V2 backward kernel
-        
+
         // We need to recompute forward output for the backward pass in some implementations,
         // but flash_attention_backward API takes `out` as input.
         // Since we don't store `out` in the node, we might need to change Node struct or recompute?
-        // Wait, standard FlashAttn backward requires `out`. 
+        // Wait, standard FlashAttn backward requires `out`.
         // My definition of FlashAttentionNode didn't store `output`.
         // I should probably store `output` tensor (detached) or recompute it?
-        // Standard recomputation implies we don't store it. 
+        // Standard recomputation implies we don't store it.
         // But the V1 kernel signature requires `out`.
         // Let's recompute it for now since we don't have it.
         // Actually, preventing recomputation is better for perf if we have memory.
         // Let's temporarily allocate and recompute forward to satisfy the API.
-        
+
         let out_recomputed = UnifiedTensor::empty(&self.q.ctx, &self.q.data.shape);
         let mask_data = self.mask.as_ref().map(|m| &*m.data);
-         engine.flash_attention_v2(
+        engine.flash_attention_v2(
             &self.q.ctx,
             &self.q.data,
             &self.k.data,
