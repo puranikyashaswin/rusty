@@ -37,10 +37,17 @@ struct FlashV2Params {
     // Dropout params (aligned to 16 bytes)
     dropout_prob: f32,
     seed_val: u32,
-    _pad1: u32,
+    // Mask params
+    has_mask: u32,
     _pad2: u32,
+    // Mask Strides (for broadcasting)
+    mask_stride_b: u32,
+    mask_stride_h: u32,
+    mask_stride_q: u32,
+    mask_stride_k: u32,
 };
 @group(0) @binding(4) var<uniform> flash_v2_params: FlashV2Params;
+@group(0) @binding(5) var<storage, read> flash_v2_mask: array<f32>;
 
 // Simple 3D hash for RNG (PCG-like)
 fn hash3(x: u32, y: u32, z: u32) -> f32 {
@@ -183,6 +190,18 @@ fn flash_attention_v2_metal(
                     sum_vec += q_vec * k_vec;
                 }
                 score = (sum_vec.x + sum_vec.y + sum_vec.z + sum_vec.w) * flash_v2_params.scale;
+                
+                // Apply Mask (if exists)
+                if (flash_v2_params.has_mask == 1u) {
+                    // Calculate mask index using strides (supports broadcasting)
+                    let mask_idx = 
+                        batch_idx * flash_v2_params.mask_stride_b + 
+                        head_idx * flash_v2_params.mask_stride_h + 
+                        q_idx * flash_v2_params.mask_stride_q + 
+                        k_pos * flash_v2_params.mask_stride_k;
+                    
+                    score += flash_v2_mask[mask_idx];
+                }
                 
                 // Handle remainder
                 for (var d = (flash_v2_params.head_dim / 4u) * 4u; d < flash_v2_params.head_dim; d++) {

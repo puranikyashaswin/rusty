@@ -353,6 +353,7 @@ impl GroupedQueryAttention {
         q: &UnifiedTensor,
         k: &UnifiedTensor,
         v: &UnifiedTensor,
+        mask: Option<&UnifiedTensor>,
         ctx: &WgpuContext,
         engine: &ComputeEngine,
     ) -> UnifiedTensor {
@@ -381,7 +382,8 @@ impl GroupedQueryAttention {
             &output, 
             self.causal,
             self.dropout_prob,
-            seed
+            seed,
+            mask,
         );
         
         output
@@ -468,11 +470,12 @@ impl MultiQueryAttention {
         q: &UnifiedTensor,
         k: &UnifiedTensor,
         v: &UnifiedTensor,
+        mask: Option<&UnifiedTensor>,
         ctx: &WgpuContext,
         engine: &ComputeEngine,
     ) -> UnifiedTensor {
         // Delegate to GQA with num_kv_heads = 1
-        self.gqa.forward(q, k, v, ctx, engine)
+        self.gqa.forward(q, k, v, mask, ctx, engine)
     }
 
     /// Get memory savings compared to MHA

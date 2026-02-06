@@ -230,7 +230,7 @@ async fn run_finetune(model_path: &str, dataset_path: Option<&str>) {
             }
 
             // Forward pass
-            let logits = model.forward(&engine, &input_ids, 0, None);
+            let logits = model.forward(&engine, &input_ids, 0, None, None);
             let logits_data = logits.data.to_vec(&ctx).await;
 
             // Compute cross-entropy loss
@@ -333,7 +333,7 @@ async fn run_finetune(model_path: &str, dataset_path: Option<&str>) {
     for prompt in test_prompts {
         let input_tokens = tokenizer.encode(prompt);
 
-        let logits = model.forward(&engine, &input_tokens, 0, None);
+        let logits = model.forward(&engine, &input_tokens, 0, None, None);
         let logits_data = logits.data.to_vec(&ctx).await;
 
         let vocab_size = config.vocab_size;

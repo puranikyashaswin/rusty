@@ -60,12 +60,13 @@ impl Lfm2Block {
         x: &Tensor,
         pos: usize,
         cache: Option<&KVCacheLayer>,
+        mask: Option<&UnifiedTensor>,
     ) -> Tensor {
         // Residual 1: x + Op(Norm(x))
         let h = self.operator_norm.forward(engine, x);
         let h = match &self.op {
             Lfm2LayerOp::Conv(conv) => conv.forward(engine, &h),
-            Lfm2LayerOp::Attention(attn) => attn.forward(engine, &h, pos, cache),
+            Lfm2LayerOp::Attention(attn) => attn.forward(engine, &h, pos, cache, mask),
         };
         let h = Tensor::add(x, &h, engine);
 
@@ -111,6 +112,7 @@ impl Lfm2Model {
         input_ids: &[u32],
         pos: usize,
         cache: Option<&mut crate::KVCache>,
+        mask: Option<&UnifiedTensor>,
     ) -> Tensor {
         let ctx = self.embed_tokens.ctx.clone();
 
@@ -122,7 +124,7 @@ impl Lfm2Model {
         // 2. Layers
         for (i, layer) in self.layers.iter().enumerate() {
             let layer_cache = cache.as_ref().map(|c| &c.layers[i]);
-            x = layer.forward(engine, &x, pos, layer_cache);
+            x = layer.forward(engine, &x, pos, layer_cache, mask);
         }
 
         // 3. Final Norm & Head

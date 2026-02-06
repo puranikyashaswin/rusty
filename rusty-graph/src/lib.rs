@@ -195,6 +195,7 @@ impl Attention {
         x: &Tensor,
         pos: usize,
         cache: Option<&KVCacheLayer>,
+        mask: Option<&UnifiedTensor>,
     ) -> Tensor {
         let q = self.q_proj.forward(engine, x);
         let k = self.k_proj.forward(engine, x);
@@ -246,7 +247,7 @@ impl Attention {
             let c_v_4d = c.value.reshaped(&[cache_shape[0], cache_shape[1], self.num_kv_heads, self.head_dim]);
 
             // Compute attention using cached K,V
-            let attn_out_4d = gqa.forward(&q_4d, &c_k_4d, &c_v_4d, &x.ctx, engine);
+            let attn_out_4d = gqa.forward(&q_4d, &c_k_4d, &c_v_4d, mask, &x.ctx, engine);
             
             // Reshape back to 3D [B, S, H*D]
             let attn_out = attn_out_4d.reshaped(&[batch, seq_len, self.n_heads * self.head_dim]);
@@ -254,7 +255,7 @@ impl Attention {
             self.o_proj.forward(engine, &attn_tensor)
         } else {
             // No cache, use current K,V only
-            let attn_out_4d = gqa.forward(&q_4d, &k_4d, &v_4d, &x.ctx, engine);
+            let attn_out_4d = gqa.forward(&q_4d, &k_4d, &v_4d, mask, &x.ctx, engine);
             
             // Reshape back to 3D
             let attn_out = attn_out_4d.reshaped(&[batch, seq_len, self.n_heads * self.head_dim]);
@@ -351,9 +352,10 @@ impl LlamaBlock {
         input: &Tensor,
         pos: usize,
         cache: Option<&KVCacheLayer>,
+        mask: Option<&UnifiedTensor>,
     ) -> Tensor {
         let normalized1 = self.norm1.forward(engine, input);
-        let attn_out = self.attn.forward(engine, &normalized1, pos, cache);
+        let attn_out = self.attn.forward(engine, &normalized1, pos, cache, mask);
         let h = Tensor::add(input, &attn_out, engine);
         let normalized2 = self.norm2.forward(engine, &h);
         let mlp_out = self.mlp.forward(engine, &normalized2);
@@ -407,11 +409,12 @@ impl LlamaModel {
         input_ids: &[u32],
         start_pos: usize,
         cache: Option<&mut KVCache>,
+        mask: Option<&UnifiedTensor>,
     ) -> Tensor {
         let mut x = self.embed_tokens.forward(ctx, engine, input_ids);
         for (i, layer) in self.layers.iter().enumerate() {
             let layer_cache = cache.as_ref().map(|c| &c.layers[i]);
-            x = layer.forward(engine, &x, start_pos, layer_cache);
+            x = layer.forward(engine, &x, start_pos, layer_cache, mask);
         }
         let x_norm = self.norm.forward(engine, &x);
         self.lm_head.forward(engine, &x_norm)
@@ -458,4 +461,32 @@ pub struct KVCacheLayer {
 }
 pub struct KVCache {
     pub layers: Vec<KVCacheLayer>,
+}
+
+/// Helper to create a padding mask for Flash Attention V2 (additive mask)
+/// 
+/// Returns a tensor of shape [batch_size, 1, 1, max_seq_len] (or broadcastable).
+/// - 0.0 for valid positions
+/// - -1e9 for padded positions
+pub fn create_padding_mask(
+    ctx: &WgpuContext,
+    lengths: &[usize], 
+    max_seq_len: usize,
+) -> UnifiedTensor {
+    let batch_size = lengths.len();
+    let mut mask_data = vec![0.0f32; batch_size * max_seq_len];
+    
+    for (b, &len) in lengths.iter().enumerate() {
+        for s in 0..max_seq_len {
+            if s >= len {
+                mask_data[b * max_seq_len + s] = -1e9;
+            }
+        }
+    }
+    
+    UnifiedTensor::new(
+        ctx,
+        &mask_data,
+        &[batch_size, 1, 1, max_seq_len],
+    )
 }

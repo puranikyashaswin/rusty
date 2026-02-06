@@ -2960,6 +2960,16 @@ impl ComputeEngine {
                                 },
                                 count: None,
                             },
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 5,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
                         ],
                     })
             },
@@ -4767,6 +4777,7 @@ impl ComputeEngine {
         causal: bool,
         dropout_prob: f32,
         seed: u64,
+        mask: Option<&UnifiedTensor>,
     ) {
         // Assume 4D shapes: [batch, seq, heads, dim]
         let batch_size = q.shape[0] as u32;
@@ -4781,11 +4792,69 @@ impl ComputeEngine {
         let causal_flag = if causal { 1u32 } else { 0u32 };
         let scale = 1.0 / (head_dim as f32).sqrt();
 
+        // Mask Params
+        let mut has_mask = 0u32;
+        let mut mask_stride_b = 0u32;
+        let mut mask_stride_h = 0u32;
+        let mut mask_stride_q = 0u32;
+        let mut mask_stride_k = 0u32;
+        
+        let dummy_mask;
+        let mask_buf = if let Some(m) = mask {
+            has_mask = 1;
+            // Calculate strides for broadcasting
+            // Assume mask is 4D: [batch, heads, seq_q, seq_k]
+            // If dimensions are 1, stride is 0 (broadcast)
+            let shape = &m.shape;
+            if shape.len() == 4 {
+               let _s3 = 1;
+               let s2 = if shape[3] > 1 { shape[3] as u32 } else { 0 }; // K dim
+               let s1 = if shape[2] > 1 { shape[2] as u32 * s2 } else { 0 }; // Q dim
+               let _s0 = if shape[1] > 1 { shape[1] as u32 * s1 } else { 0 }; // H dim
+               
+               // Actually, strides logic depends on memory layout (contiguous)
+               // Stride[i] is how much index increases when dim[i] increases by 1
+               // If shape[i] == 1, accessing index x is always 0, so stride effectively 0 for that dim input
+               
+               // But we are mapping (b, h, q, k) to mask index.
+               // if mask_dim[i] == 1: mask_idx += 0
+               // else: mask_idx += input_idx * stride[i]
+               // stride[i] is the products of lower dimensions
+               
+               let dim_k = shape[3] as u32;
+               let dim_q = shape[2] as u32;
+               let dim_h = shape[1] as u32;
+               let dim_b = shape[0] as u32;
+               
+               // Strides of the MASK tensor
+               let real_stride_k = 1u32;
+               let real_stride_q = dim_k;
+               let real_stride_h = dim_k * dim_q;
+               let real_stride_b = dim_k * dim_q * dim_h;
+               
+               mask_stride_k = if dim_k > 1 { real_stride_k } else { 0 };
+               mask_stride_q = if dim_q > 1 { real_stride_q } else { 0 };
+               mask_stride_h = if dim_h > 1 { real_stride_h } else { 0 };
+               mask_stride_b = if dim_b > 1 { real_stride_b } else { 0 };
+            }
+            
+            m.buffer()
+        } else {
+            // Create dummy buffer
+            dummy_mask = ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Dummy Mask"),
+                contents: &[0u8; 4],
+                usage: wgpu::BufferUsages::STORAGE,
+            });
+            &dummy_mask
+        };
+
         // flash_v2_params struct alignment:
         // vec4: batch_size, num_heads, seq_q, seq_k
         // vec4: head_dim, causal, scale, num_kv_heads
-        // vec4: dropout_prob, seed_val, pad, pad
-        let params: [u32; 12] = [
+        // vec4: dropout_prob, seed_val, has_mask, pad
+        // vec4: mask_stride_b, mask_stride_h, mask_stride_q, mask_stride_k
+        let params: [u32; 16] = [
             batch_size, 
             num_heads, 
             seq_q, 
@@ -4795,9 +4864,13 @@ impl ComputeEngine {
             scale.to_bits(), // bit-cast f32 to u32
             num_kv_heads,
             dropout_prob.to_bits(),
-            (seed & 0xFFFFFFFF) as u32, // Use lower 32 bits of seed
+            (seed & 0xFFFFFFFF) as u32,
+            has_mask,
             0,
-            0
+            mask_stride_b,
+            mask_stride_h,
+            mask_stride_q,
+            mask_stride_k,
         ];
 
         let params_buf = ctx
@@ -4832,6 +4905,10 @@ impl ComputeEngine {
                 wgpu::BindGroupEntry {
                     binding: 4,
                     resource: params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: mask_buf.as_entire_binding(),
                 },
             ],
         });

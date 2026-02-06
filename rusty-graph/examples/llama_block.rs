@@ -42,6 +42,8 @@ fn main() {
                 o_proj: mk_lin(),
                 n_heads: 1,
                 head_dim: 4,
+                num_kv_heads: 1,
+                dropout_prob: 0.0,
             },
             norm2: RMSNorm::new(w_norm.clone(), 1e-5),
             mlp,
@@ -51,7 +53,7 @@ fn main() {
         let input = mk_tensor(vec![1.0, 1.0, 1.0, 1.0], &[batch, 1, dim]);
 
         println!("Running Llama Block...");
-        let out = block.forward(&engine, &input, 0, None);
+        let out = block.forward(&engine, &input, 0, None, None);
 
         let result = out.data.to_vec(&ctx).await;
         println!("Block Output: {:?}", result);

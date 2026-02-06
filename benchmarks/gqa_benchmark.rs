@@ -46,7 +46,7 @@ fn bench_attention_variants(c: &mut Criterion) {
         let ctx = std::sync::Arc::new(pollster::block_on(async { WgpuContext::new().await }));
         let engine = ComputeEngine::new(&ctx);
         let num_kv_heads = 8;
-        let attn = GroupedQueryAttention::new(hidden_dim, num_heads, num_kv_heads, true);
+        let attn = GroupedQueryAttention::new(hidden_dim, num_heads, num_kv_heads, true, 0.0);
         
         // Q: [1, seq, 32, 128]
         let q = UnifiedTensor::new(&ctx, &vec![0.0; 1 * seq_len * num_heads * head_dim], &[1, seq_len, num_heads, head_dim]);
@@ -55,7 +55,7 @@ fn bench_attention_variants(c: &mut Criterion) {
         let v = UnifiedTensor::new(&ctx, &vec![0.0; 1 * seq_len * num_kv_heads * head_dim], &[1, seq_len, num_kv_heads, head_dim]);
         
         b.iter(|| {
-            let output = attn.forward(&q, &k, &v, &ctx, &engine);
+            let output = attn.forward(&q, &k, &v, None, &ctx, &engine);
             black_box(output);
         });
     });
@@ -64,7 +64,7 @@ fn bench_attention_variants(c: &mut Criterion) {
     group.bench_function("MQA (32/1 heads)", |b| {
         let ctx = std::sync::Arc::new(pollster::block_on(async { WgpuContext::new().await }));
         let engine = ComputeEngine::new(&ctx);
-        let attn = MultiQueryAttention::new(hidden_dim, num_heads, true);
+        let attn = MultiQueryAttention::new(hidden_dim, num_heads, true, 0.0);
         
         // Q: [1, seq, 32, 128]
         let q = UnifiedTensor::new(&ctx, &vec![0.0; 1 * seq_len * num_heads * head_dim], &[1, seq_len, num_heads, head_dim]);
@@ -73,7 +73,7 @@ fn bench_attention_variants(c: &mut Criterion) {
         let v = UnifiedTensor::new(&ctx, &vec![0.0; 1 * seq_len * 1 * head_dim], &[1, seq_len, 1, head_dim]);
         
         b.iter(|| {
-            let output = attn.forward(&q, &k, &v, &ctx, &engine);
+            let output = attn.forward(&q, &k, &v, None, &ctx, &engine);
             black_box(output);
         });
     });

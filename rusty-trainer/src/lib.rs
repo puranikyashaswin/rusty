@@ -43,7 +43,7 @@ impl Trainer {
         // Forward pass
         let logits = self
             .model
-            .forward(&self.ctx, &self.engine, input_ids, 0, None);
+            .forward(&self.ctx, &self.engine, input_ids, 0, None, None);
 
         // Loss calculation (MSE for demo)
         let loss = Tensor::mse_loss(&logits, target, &self.engine);
