@@ -194,6 +194,24 @@ impl UnifiedTensor {
         Self::empty_with_dtype(context, shape, DType::FP16)
     }
 
+    /// Create a new tensor view with different shape but sharing the same underlying data
+    pub fn reshaped(&self, new_shape: &[usize]) -> Self {
+        // Validation: sizes must match
+        let current_elements: usize = self.shape.iter().product();
+        let new_elements: usize = new_shape.iter().product();
+        assert_eq!(
+            current_elements, new_elements,
+            "Cannot reshape tensor of size {} to {:?}",
+            current_elements, new_shape
+        );
+
+        Self {
+            data: self.data.clone(),
+            shape: new_shape.to_vec(),
+            dtype: self.dtype,
+        }
+    }
+
     pub async fn to_vec(&self, context: &WgpuContext) -> Vec<f32> {
         let size = self.size_in_bytes();
         let staging = context.device.create_buffer(&wgpu::BufferDescriptor {
@@ -299,6 +317,9 @@ pub struct ComputeEngine {
     flash_attn_bg_layout: wgpu::BindGroupLayout,
     flash_attn_bw_pipeline: wgpu::ComputePipeline,
     flash_attn_bw_bg_layout: wgpu::BindGroupLayout,
+    // --- Flash Attention V2 (Native GQA) ---
+    flash_attn_v2_pipeline: wgpu::ComputePipeline,
+    flash_attn_v2_bg_layout: wgpu::BindGroupLayout,
 }
 
 #[repr(C)]
@@ -315,11 +336,16 @@ pub struct AdamParams {
 
 impl ComputeEngine {
     pub fn new(ctx: &WgpuContext) -> Self {
+        // Concatenate kernel files
+        let kernels_src = include_str!("kernels.wgsl");
+        let flash_v2_src = include_str!("flash_attention_v2.wgsl");
+        let combined_src = format!("{}\n{}", kernels_src, flash_v2_src);
+
         let module = ctx
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Kernels"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("kernels.wgsl"))),
+                source: wgpu::ShaderSource::Wgsl(Cow::Owned(combined_src)),
             });
 
         let add_bg_layout = ctx
@@ -2878,6 +2904,139 @@ impl ComputeEngine {
                         entry_point: "flash_attention_simple",
                     })
             },
+            // --- Flash Attention V2 Pipeline (Native GQA) ---
+            flash_attn_v2_bg_layout: {
+                ctx.device
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("Flash Attn V2 Layout"),
+                        entries: &[
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 0,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 1,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 2,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 3,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 4,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Uniform,
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                        ],
+                    })
+            },
+            flash_attn_v2_pipeline: {
+                // Reuse layout definition logic as we can't easily reference the struct field here
+                // We create a temp layout for pipeline creation
+                let layout = ctx.device
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("Flash Attn V2 Layout Temp"),
+                        entries: &[
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 0,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 1,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 2,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 3,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 4,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Uniform,
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
+                            },
+                        ],
+                    });
+                
+                ctx.device
+                    .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                        label: Some("Flash Attn V2 Pipeline"),
+                        layout: Some(&ctx.device.create_pipeline_layout(
+                            &wgpu::PipelineLayoutDescriptor {
+                                label: None,
+                                bind_group_layouts: &[&layout],
+                                push_constant_ranges: &[],
+                            },
+                        )),
+                        module: &module,
+                        entry_point: "flash_attention_v2_metal", 
+                    })
+            },
             flash_attn_bw_bg_layout: {
                 ctx.device
                     .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -4586,6 +4745,104 @@ impl ComputeEngine {
             pass.set_bind_group(0, &bg, &[]);
             // Dispatch one workgroup per query position
             pass.dispatch_workgroups((seq_len + 63) / 64, 1, 1);
+        }
+        ctx.queue.submit(Some(encoder.finish()));
+    }
+
+    /// Flash Attention V2 forward pass with Native GQA Support
+    ///
+    /// # Arguments
+    /// * `q` - Query tensor [batch, seq_q, num_heads, head_dim]
+    /// * `k` - Key tensor [batch, seq_k, num_kv_heads, head_dim]
+    /// * `v` - Value tensor [batch, seq_k, num_kv_heads, head_dim]
+    /// * `out` - Output tensor [batch, seq_q, num_heads, head_dim]
+    /// * `causal` - Whether to apply causal masking
+    pub fn flash_attention_v2(
+        &self,
+        ctx: &WgpuContext,
+        q: &UnifiedTensor,
+        k: &UnifiedTensor,
+        v: &UnifiedTensor,
+        out: &UnifiedTensor,
+        causal: bool,
+    ) {
+        // Assume 4D shapes: [batch, seq, heads, dim]
+        let batch_size = q.shape[0] as u32;
+        let seq_q = q.shape[1] as u32;
+        let num_heads = q.shape[2] as u32;
+        let head_dim = q.shape[3] as u32;
+        
+        // K/V shapes
+        let seq_k = k.shape[1] as u32;
+        let num_kv_heads = k.shape[2] as u32;
+        
+        let causal_flag = if causal { 1u32 } else { 0u32 };
+        let scale = 1.0 / (head_dim as f32).sqrt();
+
+        // flash_v2_params struct alignment:
+        // batch_size, num_heads, seq_q, seq_k, head_dim, causal, scale, num_kv_heads
+        let params: [u32; 8] = [
+            batch_size, 
+            num_heads, 
+            seq_q, 
+            seq_k, 
+            head_dim, 
+            causal_flag, 
+            scale.to_bits(), // bit-cast f32 to u32
+            num_kv_heads
+        ];
+
+        let params_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Flash Attn V2 Params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.flash_attn_v2_bg_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: q.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: k.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: v.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: out.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: params_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            pass.set_pipeline(&self.flash_attn_v2_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            
+            // Dispatch size: (1, seq_q / TILE_Q, batch * num_heads)
+            // TILE_Q = 32 in metal kernel
+            let tile_q = 32u32;
+            let x = 1u32;
+            let y = (seq_q + tile_q - 1) / tile_q;
+            let z = batch_size * num_heads;
+            
+            pass.dispatch_workgroups(x, y, z);
         }
         ctx.queue.submit(Some(encoder.finish()));
     }

@@ -346,45 +346,20 @@ impl GroupedQueryAttention {
         ctx: &WgpuContext,
         engine: &ComputeEngine,
     ) -> UnifiedTensor {
-        // For GQA, we need to repeat K and V heads to match Q heads
-        // K, V shape: [batch, seq, num_kv_heads, head_dim]
-        // Need to expand to: [batch, seq, num_heads, head_dim]
-        
+        // Validation: Expect 4D tensors [batch, seq, heads, dim]
+        if q.shape.len() != 4 || k.shape.len() != 4 || v.shape.len() != 4 {
+            panic!("GroupedQueryAttention expects 4D tensors (batch, seq, heads, dim)");
+        }
+
         let batch_size = q.shape[0];
         let seq_q = q.shape[1];
-        let _seq_k = k.shape[1];
         
-        // Expand K and V by repeating each KV head `num_groups` times
-        let k_expanded = self.expand_kv_heads(k, ctx, engine);
-        let v_expanded = self.expand_kv_heads(v, ctx, engine);
-        
-        // Now run standard flash attention with expanded K, V
         let output = UnifiedTensor::empty(ctx, &[batch_size, seq_q, self.num_heads, self.head_dim]);
         
-        // Use flash attention kernel
-        engine.flash_attention(ctx, q, &k_expanded, &v_expanded, &output, self.causal);
+        // Use native GQA kernel (V2)
+        engine.flash_attention_v2(ctx, q, k, v, &output, self.causal);
         
         output
-    }
-
-    /// Expand KV heads to match query heads
-    fn expand_kv_heads(
-        &self,
-        kv: &UnifiedTensor,
-        ctx: &WgpuContext,
-        _engine: &ComputeEngine,
-    ) -> UnifiedTensor {
-        // If already same number of heads, return as-is
-        if self.num_kv_heads == self.num_heads {
-            return UnifiedTensor::empty(ctx, &kv.shape);
-        }
-        
-        // TODO: Implement efficient GPU kernel for KV head expansion
-        // For now, create expanded tensor (actual expansion would be done in kernel)
-        let batch_size = kv.shape[0];
-        let seq_len = kv.shape[1];
-        
-        UnifiedTensor::empty(ctx, &[batch_size, seq_len, self.num_heads, self.head_dim])
     }
 
     /// Get memory savings compared to standard MHA

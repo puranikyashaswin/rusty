@@ -184,6 +184,7 @@ pub struct Attention {
     pub o_proj: Linear,
     pub n_heads: usize,
     pub head_dim: usize,
+    pub num_kv_heads: usize,
 }
 
 impl Attention {
@@ -203,30 +204,58 @@ impl Attention {
         engine.rope(&x.ctx, &q.data, self.head_dim, pos);
         engine.rope(&x.ctx, &k.data, self.head_dim, pos);
 
+        // Reshape for GQA [batch, seq, n_heads, head_dim]
+        let batch = q.data.shape[0];
+        let seq_len = q.data.shape[1];
+        
+        let q_4d = q.data.reshaped(&[batch, seq_len, self.n_heads, self.head_dim]);
+        let k_4d = k.data.reshaped(&[batch, seq_len, self.num_kv_heads, self.head_dim]);
+        let v_4d = v.data.reshaped(&[batch, seq_len, self.num_kv_heads, self.head_dim]);
+
+        // Initialize GQA helper
+        let gqa = GroupedQueryAttention::new(
+            self.n_heads * self.head_dim,
+            self.n_heads,
+            self.num_kv_heads,
+            true // causal
+        );
+
         // Use cached K,V if available (for incremental decoding)
         if let Some(c) = cache {
             // Copy current K,V to cache at position
+            // Important: Use num_kv_heads for offset calculation!
             engine.copy_tensor(
                 &x.ctx,
                 &k.data,
                 &c.key,
-                pos * self.n_heads * self.head_dim * 4,
+                pos * self.num_kv_heads * self.head_dim * 4,
             );
             engine.copy_tensor(
                 &x.ctx,
                 &v.data,
                 &c.value,
-                pos * self.n_heads * self.head_dim * 4,
+                pos * self.num_kv_heads * self.head_dim * 4,
             );
+            
+            // Reshape cache for GQA (assuming cache is [B, MaxSeq, H_KV, D])
+            // Note: cache.key is likely [B, MaxSeq, H_KV * D]
+            let cache_shape = &c.key.shape;
+            let c_k_4d = c.key.reshaped(&[cache_shape[0], cache_shape[1], self.num_kv_heads, self.head_dim]);
+            let c_v_4d = c.value.reshaped(&[cache_shape[0], cache_shape[1], self.num_kv_heads, self.head_dim]);
+
             // Compute attention using cached K,V
-            let attn_out = UnifiedTensor::empty(&x.ctx, &v.data.shape);
-            engine.flash_attention(&x.ctx, &q.data, &c.key, &c.value, &attn_out, true);
+            let attn_out_4d = gqa.forward(&q_4d, &c_k_4d, &c_v_4d, &x.ctx, engine);
+            
+            // Reshape back to 3D [B, S, H*D]
+            let attn_out = attn_out_4d.reshaped(&[batch, seq_len, self.n_heads * self.head_dim]);
             let attn_tensor = Tensor::new(x.ctx.clone(), attn_out);
             self.o_proj.forward(engine, &attn_tensor)
         } else {
             // No cache, use current K,V only
-            let attn_out = UnifiedTensor::empty(&x.ctx, &v.data.shape);
-            engine.flash_attention(&x.ctx, &q.data, &k.data, &v.data, &attn_out, true);
+            let attn_out_4d = gqa.forward(&q_4d, &k_4d, &v_4d, &x.ctx, engine);
+            
+            // Reshape back to 3D
+            let attn_out = attn_out_4d.reshaped(&[batch, seq_len, self.n_heads * self.head_dim]);
             let attn_tensor = Tensor::new(x.ctx.clone(), attn_out);
             self.o_proj.forward(engine, &attn_tensor)
         }

@@ -33,7 +33,7 @@ struct FlashV2Params {
     head_dim: u32,
     causal: u32,
     scale: f32,
-    _pad: u32,
+    num_kv_heads: u32, // Replaces _pad for GQA support
 };
 @group(0) @binding(4) var<uniform> flash_v2_params: FlashV2Params;
 
@@ -51,6 +51,11 @@ fn flash_attention_v2_metal(
 ) {
     let batch_idx = wg_id.z / flash_v2_params.num_heads;
     let head_idx = wg_id.z % flash_v2_params.num_heads;
+    
+    // GQA: Map query head index to KV head index
+    // group_size = num_heads / num_kv_heads
+    let kv_head_idx = head_idx / (flash_v2_params.num_heads / flash_v2_params.num_kv_heads);
+    
     let q_block_idx = wg_id.y;
     let q_idx = q_block_idx * FLASH_V2_TILE_Q + local_id.y;
     
@@ -102,7 +107,8 @@ fn flash_attention_v2_metal(
         // Load K tile with vectorized operations
         let k_load_idx = k_start + local_id.y;
         if (k_load_idx < flash_v2_params.seq_k) {
-            let k_base = ((batch_idx * flash_v2_params.num_heads + head_idx) * flash_v2_params.seq_k + k_load_idx) * flash_v2_params.head_dim;
+            // GQA: Use kv_head_idx and num_kv_heads for base calculation
+            let k_base = ((batch_idx * flash_v2_params.num_kv_heads + kv_head_idx) * flash_v2_params.seq_k + k_load_idx) * flash_v2_params.head_dim;
             
             for (var d = local_id.x * 4u; d < flash_v2_params.head_dim; d += 128u) {
                 if (d + 3u < flash_v2_params.head_dim) {
@@ -116,7 +122,8 @@ fn flash_attention_v2_metal(
         
         // Load V tile with vectorized operations
         if (k_load_idx < flash_v2_params.seq_k) {
-            let v_base = ((batch_idx * flash_v2_params.num_heads + head_idx) * flash_v2_params.seq_k + k_load_idx) * flash_v2_params.head_dim;
+            // GQA: Use kv_head_idx and num_kv_heads for base calculation
+            let v_base = ((batch_idx * flash_v2_params.num_kv_heads + kv_head_idx) * flash_v2_params.seq_k + k_load_idx) * flash_v2_params.head_dim;
             
             for (var d = local_id.x * 4u; d < flash_v2_params.head_dim; d += 128u) {
                 if (d + 3u < flash_v2_params.head_dim) {

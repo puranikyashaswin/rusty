@@ -152,6 +152,7 @@ impl<'a> Lfm2ModelBuilder<'a> {
 
     fn build_attention(&self, prefix: &str) -> Attention {
         let n_heads = self.config.num_attention_heads;
+        let num_kv_heads = self.config.num_key_value_heads.unwrap_or(n_heads);
         let head_dim = self.config.hidden_size / n_heads;
 
         Attention {
@@ -161,6 +162,7 @@ impl<'a> Lfm2ModelBuilder<'a> {
             o_proj: self.build_linear(&format!("{}.out_proj", prefix), "out_proj"),
             n_heads,
             head_dim,
+            num_kv_heads,
         }
     }
 
