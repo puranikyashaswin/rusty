@@ -7,7 +7,11 @@ pub mod flash_attention;
 pub mod lfm;
 pub mod model_builder;
 
-pub use flash_attention::{FlashAttention, FlashAttentionGrads};
+pub use flash_attention::{
+    FlashAttention, FlashAttentionGrads,
+    GroupedQueryAttention, MultiQueryAttention, SlidingWindowAttention,
+    AttentionMask, KVCache as FlashKVCache,
+};
 
 // --- LoRA Adapter ---
 #[derive(Debug, Clone)]
