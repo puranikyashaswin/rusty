@@ -9,6 +9,7 @@ members = [
     "rusty-trainer",
     "rusty-hub",
     "benchmarks",
+    "rusty-monitor",
 ]
 resolver = "2"
 

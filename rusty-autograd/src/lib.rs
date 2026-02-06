@@ -563,6 +563,123 @@ impl Tensor {
         });
         Tensor::with_creator(up.ctx.clone(), out_data, node)
     }
+
+    /// Flash Attention V2 (Fused)
+    pub fn flash_attention(
+        q: &Tensor,
+        k: &Tensor,
+        v: &Tensor,
+        mask: Option<&Tensor>,
+        causal: bool,
+        dropout_prob: f32,
+        seed: u64,
+        engine: &ComputeEngine,
+    ) -> Tensor {
+        // Output shape same as Query
+        let out_data = UnifiedTensor::empty(&q.ctx, &q.data.shape);
+        let mask_data = mask.map(|m| &*m.data);
+        
+        engine.flash_attention_v2(
+            &q.ctx,
+            &q.data,
+            &k.data,
+            &v.data,
+            &out_data,
+            causal,
+            dropout_prob,
+            seed,
+            mask_data,
+        );
+
+        let node = Arc::new(FlashAttentionNode {
+            q: q.clone(),
+            k: k.clone(),
+            v: v.clone(),
+            mask: mask.cloned(),
+            causal,
+            dropout_prob,
+            seed,
+        });
+        
+        Tensor::with_creator(q.ctx.clone(), out_data, node)
+    }
+}
+
+pub struct FlashAttentionNode {
+    pub q: Tensor,
+    pub k: Tensor,
+    pub v: Tensor,
+    pub mask: Option<Tensor>,
+    pub causal: bool,
+    pub dropout_prob: f32,
+    pub seed: u64,
+}
+
+impl AutogradNode for FlashAttentionNode {
+    fn inputs(&self) -> Vec<Tensor> {
+        let mut inputs = vec![self.q.clone(), self.k.clone(), self.v.clone()];
+        if let Some(m) = &self.mask {
+            inputs.push(m.clone());
+        }
+        inputs
+    }
+
+    fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
+        let grad_q = UnifiedTensor::empty(&self.q.ctx, &self.q.data.shape);
+        let grad_k = UnifiedTensor::empty(&self.k.ctx, &self.k.data.shape);
+        let grad_v = UnifiedTensor::empty(&self.v.ctx, &self.v.data.shape);
+
+        // Warning: using V1 backward for now (assumes single-head, no GQA)
+        // TODO: Update to V2 backward kernel
+        
+        // We need to recompute forward output for the backward pass in some implementations,
+        // but flash_attention_backward API takes `out` as input.
+        // Since we don't store `out` in the node, we might need to change Node struct or recompute?
+        // Wait, standard FlashAttn backward requires `out`. 
+        // My definition of FlashAttentionNode didn't store `output`.
+        // I should probably store `output` tensor (detached) or recompute it?
+        // Standard recomputation implies we don't store it. 
+        // But the V1 kernel signature requires `out`.
+        // Let's recompute it for now since we don't have it.
+        // Actually, preventing recomputation is better for perf if we have memory.
+        // Let's temporarily allocate and recompute forward to satisfy the API.
+        
+        let out_recomputed = UnifiedTensor::empty(&self.q.ctx, &self.q.data.shape);
+        let mask_data = self.mask.as_ref().map(|m| &*m.data);
+         engine.flash_attention_v2(
+            &self.q.ctx,
+            &self.q.data,
+            &self.k.data,
+            &self.v.data,
+            &out_recomputed,
+            self.causal,
+            self.dropout_prob,
+            self.seed,
+            mask_data,
+        );
+
+        engine.flash_attention_backward(
+            &self.q.ctx,
+            &self.q.data,
+            &self.k.data,
+            &self.v.data,
+            &out_recomputed,
+            grad,
+            &grad_q,
+            &grad_k,
+            &grad_v,
+            self.causal,
+        );
+
+        let mut grads = vec![grad_q, grad_k, grad_v];
+        if let Some(m) = &self.mask {
+            // Mask gradient is usually not needed (if mask is constant/padding)
+            // But if mask is learned (e.g. bias), we need it.
+            // Current kernel doesn't support mask grad. Return zeros.
+            grads.push(UnifiedTensor::zeros(&m.ctx, &m.data.shape));
+        }
+        grads
+    }
 }
 
 pub trait Optimizer: Send + Sync {
