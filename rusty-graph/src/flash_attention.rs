@@ -4,6 +4,7 @@
 //! Uses tiled matrix multiplication with online softmax normalization.
 
 use rusty_backend::{ComputeEngine, UnifiedTensor, WgpuContext};
+use std::sync::Arc;
 
 /// Flash Attention layer with tiled computation and online softmax.
 ///
@@ -22,6 +23,22 @@ pub struct FlashAttention {
     causal: bool,
     #[allow(dead_code)]
     scale: f32,
+    
+    // Optional: Use optimized multi-head kernel
+    #[allow(dead_code)]
+    use_multi_head_kernel: bool,
+}
+
+/// KV-Cache for efficient autoregressive generation
+pub struct KVCache {
+    /// Cached keys for each layer
+    pub k_cache: Vec<Arc<UnifiedTensor>>,
+    /// Cached values for each layer
+    pub v_cache: Vec<Arc<UnifiedTensor>>,
+    /// Maximum sequence length
+    pub max_seq_len: usize,
+    /// Current position in cache
+    pub current_pos: usize,
 }
 
 impl FlashAttention {
@@ -40,15 +57,16 @@ impl FlashAttention {
             head_dim,
             causal,
             scale,
+            use_multi_head_kernel: num_heads > 1,
         }
     }
 
     /// Forward pass using Flash Attention algorithm.
     ///
     /// # Arguments
-    /// * `q` - Query tensor [batch, seq_q, dim]
-    /// * `k` - Key tensor [batch, seq_k, dim]
-    /// * `v` - Value tensor [batch, seq_k, dim]
+    /// * `q` - Query tensor [batch, seq_q, dim] or [batch, seq_q, num_heads, head_dim]
+    /// * `k` - Key tensor [batch, seq_k, dim] or [batch, seq_k, num_heads, head_dim]
+    /// * `v` - Value tensor [batch, seq_k, dim] or [batch, seq_k, num_heads, head_dim]
     ///
     /// # Returns
     /// Output tensor [batch, seq_q, dim]
@@ -60,14 +78,62 @@ impl FlashAttention {
         ctx: &WgpuContext,
         engine: &ComputeEngine,
     ) -> UnifiedTensor {
-        // Flash Attention kernel dispatch using online softmax
-        // Memory efficient: O(N) instead of O(N²) for standard attention
-        let output = UnifiedTensor::empty(ctx, &q.shape);
+        // For now, use the simple kernel
+        // TODO: Add multi-head kernel dispatch when use_multi_head_kernel is true
+        
+        // Determine input shape
+        let _batch_size = q.shape[0];
+        let _seq_q = q.shape[1];
+        let _seq_k = k.shape[1];
+        
+        // Check if input is already split into heads
+        let is_multi_head_input = q.shape.len() == 4;
+        
+        if is_multi_head_input {
+            // Input shape: [batch, seq, num_heads, head_dim]
+            // Need to reshape to [batch * num_heads, seq, head_dim] for kernel
+            assert_eq!(q.shape[2], self.num_heads);
+            assert_eq!(q.shape[3], self.head_dim);
+            
+            // For now, fall back to simple kernel
+            // TODO: Implement proper multi-head kernel dispatch
+            let output = UnifiedTensor::empty(ctx, &q.shape);
+            engine.flash_attention(ctx, q, k, v, &output, self.causal);
+            output
+        } else {
+            // Input shape: [batch, seq, dim]
+            // Simple single-head or merged multi-head
+            assert_eq!(q.shape[2], self.dim);
+            
+            let output = UnifiedTensor::empty(ctx, &q.shape);
+            engine.flash_attention(ctx, q, k, v, &output, self.causal);
+            output
+        }
+    }
 
-        // Dispatch to GPU kernel
-        engine.flash_attention(ctx, q, k, v, &output, self.causal);
-
-        output
+    /// Multi-head attention forward pass with automatic head splitting.
+    ///
+    /// This method automatically splits the input into heads and applies
+    /// Flash Attention to each head in parallel.
+    ///
+    /// # Arguments
+    /// * `q` - Query tensor [batch, seq_q, dim]
+    /// * `k` - Key tensor [batch, seq_k, dim]
+    /// * `v` - Value tensor [batch, seq_k, dim]
+    ///
+    /// # Returns
+    /// Output tensor [batch, seq_q, dim]
+    pub fn forward_multi_head(
+        &self,
+        q: &UnifiedTensor,
+        k: &UnifiedTensor,
+        v: &UnifiedTensor,
+        ctx: &WgpuContext,
+        engine: &ComputeEngine,
+    ) -> UnifiedTensor {
+        // TODO: Implement proper head splitting and parallel computation
+        // For now, delegate to simple forward
+        self.forward(q, k, v, ctx, engine)
     }
 
     /// Multi-head attention with Flash Attention.

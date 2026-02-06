@@ -290,7 +290,7 @@ async fn run_finetune(model_path: &str, dataset_path: Option<&str>) {
                     // Create GPU tensor for the logits at this position
                     let logits_slice = &logits_data[start..end];
                     let logits_tensor =
-                        UnifiedTensor::from_slice(&ctx, logits_slice, &[vocab_size]);
+                        UnifiedTensor::new(&ctx, logits_slice, &[vocab_size]);
 
                     // Compute gradient on GPU: softmax(logits) - one_hot(target)
                     let grad = UnifiedTensor::empty(&ctx, &[vocab_size]);
