@@ -33,9 +33,29 @@ struct FlashV2Params {
     head_dim: u32,
     causal: u32,
     scale: f32,
-    num_kv_heads: u32, // Replaces _pad for GQA support
+    num_kv_heads: u32, 
+    // Dropout params (aligned to 16 bytes)
+    dropout_prob: f32,
+    seed_val: u32,
+    _pad1: u32,
+    _pad2: u32,
 };
 @group(0) @binding(4) var<uniform> flash_v2_params: FlashV2Params;
+
+// Simple 3D hash for RNG (PCG-like)
+fn hash3(x: u32, y: u32, z: u32) -> f32 {
+    var a = x; var b = y; var c = z;
+    a = a * 1664525u + 1013904223u;
+    b = b * 1664525u + 1013904223u;
+    c = c * 1664525u + 1013904223u;
+    a = a + b * c;
+    b = b + c * a;
+    c = c + a * b;
+    a = a ^ (a >> 16u);
+    b = b ^ (b >> 16u);
+    c = c ^ (c >> 16u);
+    return f32(a + b + c) * 2.3283064365386963e-10; // * 1/2^32
+}
 
 // Shared memory for tiled computation (optimized layout to avoid bank conflicts)
 // Padded to 68 instead of 64 to avoid bank conflicts on some GPUs
@@ -177,6 +197,20 @@ fn flash_attention_v2_metal(
             let old_scale = exp(max_score - new_max);
             let new_scale = exp(score - new_max);
             
+            // Generate dropout mask
+            // Hash inputs: (batch_head_idx, q_idx, k_idx + seed)
+            let rand_val = hash3(
+                batch_idx * flash_v2_params.num_heads + head_idx,
+                q_idx,
+                k_pos + flash_v2_params.seed_val
+            );
+            
+            // Check if we keep this token
+            // If rand_val < prob, we drop (return 0.0). step returns 1.0 if rand >= prob.
+            let keep = step(flash_v2_params.dropout_prob, rand_val);
+            let dropout_scale = 1.0 / (1.0 - flash_v2_params.dropout_prob + 1e-6); // Avoid div by zero
+            let mask_scale = keep * dropout_scale;
+
             // Rescale accumulator
             for (var d = 0u; d < flash_v2_params.head_dim; d++) {
                 out_acc[d] *= old_scale;
@@ -184,10 +218,13 @@ fn flash_attention_v2_metal(
             sum_exp = sum_exp * old_scale + new_scale;
             max_score = new_max;
             
-            // Accumulate weighted value
+            // Accumulate weighted value with dropout
             if (k_pos < flash_v2_params.seq_k && !(flash_v2_params.causal == 1u && k_pos > q_idx)) {
+                // Apply dropout mask to the weight (new_scale)
+                let weighted_scale = new_scale * mask_scale;
+                
                 for (var d = 0u; d < flash_v2_params.head_dim; d++) {
-                    out_acc[d] += new_scale * flash_v2_v_tile[k_tile][d];
+                    out_acc[d] += weighted_scale * flash_v2_v_tile[k_tile][d];
                 }
             }
         }

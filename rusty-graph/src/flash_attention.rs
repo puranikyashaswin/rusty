@@ -293,6 +293,8 @@ pub struct GroupedQueryAttention {
     /// Scaling factor for attention scores
     #[allow(dead_code)]
     scale: f32,
+    /// Dropout probability (0.0 = no dropout)
+    pub dropout_prob: f32,
 }
 
 impl GroupedQueryAttention {
@@ -303,10 +305,17 @@ impl GroupedQueryAttention {
     /// * `num_heads` - Number of query heads
     /// * `num_kv_heads` - Number of key-value heads (must divide num_heads evenly)
     /// * `causal` - Whether to apply causal masking
+    /// * `dropout_prob` - Dropout probability
     ///
     /// # Panics
     /// Panics if `num_heads` is not divisible by `num_kv_heads`
-    pub fn new(dim: usize, num_heads: usize, num_kv_heads: usize, causal: bool) -> Self {
+    pub fn new(
+        dim: usize, 
+        num_heads: usize, 
+        num_kv_heads: usize, 
+        causal: bool,
+        dropout_prob: f32
+    ) -> Self {
         assert!(
             num_heads % num_kv_heads == 0,
             "num_heads ({}) must be divisible by num_kv_heads ({})",
@@ -326,6 +335,7 @@ impl GroupedQueryAttention {
             num_groups,
             causal,
             scale,
+            dropout_prob,
         }
     }
 
@@ -356,8 +366,23 @@ impl GroupedQueryAttention {
         
         let output = UnifiedTensor::empty(ctx, &[batch_size, seq_q, self.num_heads, self.head_dim]);
         
+        // Use time-based seed for stochastic dropout
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+
         // Use native GQA kernel (V2)
-        engine.flash_attention_v2(ctx, q, k, v, &output, self.causal);
+        engine.flash_attention_v2(
+            ctx, 
+            q, 
+            k, 
+            v, 
+            &output, 
+            self.causal,
+            self.dropout_prob,
+            seed
+        );
         
         output
     }
@@ -416,9 +441,9 @@ impl MultiQueryAttention {
     /// * `dim` - Total hidden dimension
     /// * `num_heads` - Number of query heads
     /// * `causal` - Whether to apply causal masking
-    pub fn new(dim: usize, num_heads: usize, causal: bool) -> Self {
+    pub fn new(dim: usize, num_heads: usize, causal: bool, dropout_prob: f32) -> Self {
         let head_dim = dim / num_heads;
-        let gqa = GroupedQueryAttention::new(dim, num_heads, 1, causal);
+        let gqa = GroupedQueryAttention::new(dim, num_heads, 1, causal, dropout_prob);
         
         Self {
             dim,
@@ -600,6 +625,7 @@ impl std::fmt::Debug for GroupedQueryAttention {
             .field("num_groups", &self.num_groups)
             .field("head_dim", &self.head_dim)
             .field("causal", &self.causal)
+            .field("dropout", &self.dropout_prob)
             .finish()
     }
 }

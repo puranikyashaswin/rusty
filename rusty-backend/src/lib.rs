@@ -4765,6 +4765,8 @@ impl ComputeEngine {
         v: &UnifiedTensor,
         out: &UnifiedTensor,
         causal: bool,
+        dropout_prob: f32,
+        seed: u64,
     ) {
         // Assume 4D shapes: [batch, seq, heads, dim]
         let batch_size = q.shape[0] as u32;
@@ -4780,8 +4782,10 @@ impl ComputeEngine {
         let scale = 1.0 / (head_dim as f32).sqrt();
 
         // flash_v2_params struct alignment:
-        // batch_size, num_heads, seq_q, seq_k, head_dim, causal, scale, num_kv_heads
-        let params: [u32; 8] = [
+        // vec4: batch_size, num_heads, seq_q, seq_k
+        // vec4: head_dim, causal, scale, num_kv_heads
+        // vec4: dropout_prob, seed_val, pad, pad
+        let params: [u32; 12] = [
             batch_size, 
             num_heads, 
             seq_q, 
@@ -4789,7 +4793,11 @@ impl ComputeEngine {
             head_dim, 
             causal_flag, 
             scale.to_bits(), // bit-cast f32 to u32
-            num_kv_heads
+            num_kv_heads,
+            dropout_prob.to_bits(),
+            (seed & 0xFFFFFFFF) as u32, // Use lower 32 bits of seed
+            0,
+            0
         ];
 
         let params_buf = ctx
@@ -4799,6 +4807,7 @@ impl ComputeEngine {
                 contents: bytemuck::cast_slice(&params),
                 usage: wgpu::BufferUsages::UNIFORM,
             });
+
 
         let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,

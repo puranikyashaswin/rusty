@@ -185,6 +185,7 @@ pub struct Attention {
     pub n_heads: usize,
     pub head_dim: usize,
     pub num_kv_heads: usize,
+    pub dropout_prob: f32,
 }
 
 impl Attention {
@@ -217,7 +218,8 @@ impl Attention {
             self.n_heads * self.head_dim,
             self.n_heads,
             self.num_kv_heads,
-            true // causal
+            true, // causal
+            self.dropout_prob,
         );
 
         // Use cached K,V if available (for incremental decoding)

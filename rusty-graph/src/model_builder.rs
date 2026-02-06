@@ -154,6 +154,7 @@ impl<'a> Lfm2ModelBuilder<'a> {
         let n_heads = self.config.num_attention_heads;
         let num_kv_heads = self.config.num_key_value_heads.unwrap_or(n_heads);
         let head_dim = self.config.hidden_size / n_heads;
+        let dropout_prob = self.config.attention_dropout.unwrap_or(0.0);
 
         Attention {
             q_proj: self.build_linear(&format!("{}.q_proj", prefix), "q_proj"),
@@ -163,6 +164,7 @@ impl<'a> Lfm2ModelBuilder<'a> {
             n_heads,
             head_dim,
             num_kv_heads,
+            dropout_prob,
         }
     }
 

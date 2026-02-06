@@ -56,6 +56,8 @@ pub struct Lfm2Config {
     pub bos_token_id: Option<u32>,
     #[serde(default)]
     pub eos_token_id: Option<u32>,
+    #[serde(default)]
+    pub attention_dropout: Option<f32>,
 }
 
 fn default_norm_eps() -> f32 {
