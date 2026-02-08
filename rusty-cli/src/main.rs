@@ -35,6 +35,7 @@ fn main() {
         "--help" | "-h" => print_usage(),
         "--demo" => run_demo(),
         "--benchmark" => run_benchmark(),
+        "--monitor" | "monitor" => run_monitor(),
         path => {
             // Assume it's a model path
             pollster::block_on(run_finetune(path, args.get(2).map(|s| s.as_str())));
@@ -51,6 +52,7 @@ fn print_usage() {
     println!("USAGE:");
     println!("  rusty-cli <MODEL_PATH> [DATASET_PATH]");
     println!("  rusty-cli --demo         Run demo mode");
+    println!("  rusty-cli --monitor      Launch TUI dashboard");
     println!("  rusty-cli --benchmark    Run GPU benchmarks");
     println!("  rusty-cli --help         Show this help");
     println!();
@@ -77,6 +79,12 @@ fn run_demo() {
 
 fn run_benchmark() {
     println!("Run benchmarks with: cargo run -p rusty-benchmarks --release");
+}
+
+fn run_monitor() {
+    if let Err(e) = rusty_monitor::run() {
+        eprintln!("TUI error: {}", e);
+    }
 }
 
 async fn run_finetune(model_path: &str, dataset_path: Option<&str>) {
