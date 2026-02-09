@@ -52,26 +52,29 @@ impl WgpuContext {
     }
 }
 
+use half::{bf16, f16};
+
 /// Data type for tensors - supports mixed precision training
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DType {
-    FP32, // 32-bit float (default)
-    FP16, // 16-bit float (half precision for memory savings)
+    F32,
+    F16,
+    BF16,
 }
 
 impl DType {
     /// Size of a single element in bytes
     pub fn size_bytes(&self) -> usize {
         match self {
-            DType::FP32 => 4,
-            DType::FP16 => 2,
+            DType::F32 => 4,
+            DType::F16 | DType::BF16 => 2,
         }
     }
 }
 
 impl Default for DType {
     fn default() -> Self {
-        DType::FP32
+        DType::F32
     }
 }
 
@@ -130,12 +133,34 @@ impl UnifiedTensor {
                 pool: None,
             }),
             shape: shape.to_vec(),
-            dtype: DType::FP32,
+            dtype: DType::F32,
+        }
+    }
+
+    pub fn new_f16(context: &WgpuContext, data: &[f16], shape: &[usize]) -> Self {
+        let size_in_bytes = (data.len() * 2) as u64;
+        let buffer = context
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Tensor F16"),
+                contents: bytemuck::cast_slice(data),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+            });
+        Self {
+            data: Arc::new(TensorData {
+                buffer: Arc::new(buffer),
+                size_in_bytes,
+                pool: None,
+            }),
+            shape: shape.to_vec(),
+            dtype: DType::F16,
         }
     }
 
     pub fn empty(context: &WgpuContext, shape: &[usize]) -> Self {
-        Self::empty_with_dtype(context, shape, DType::FP32)
+        Self::empty_with_dtype(context, shape, DType::F32)
     }
 
     pub fn empty_with_dtype(context: &WgpuContext, shape: &[usize], dtype: DType) -> Self {
@@ -159,7 +184,7 @@ impl UnifiedTensor {
     }
 
     pub fn from_bytes(context: &WgpuContext, data: &[u8], shape: &[usize]) -> Self {
-        Self::from_bytes_with_dtype(context, data, shape, DType::FP32)
+        Self::from_bytes_with_dtype(context, data, shape, DType::F32)
     }
 
     pub fn from_bytes_with_dtype(
@@ -191,7 +216,7 @@ impl UnifiedTensor {
 
     /// Create an FP16 tensor (half precision for memory savings)
     pub fn empty_fp16(context: &WgpuContext, shape: &[usize]) -> Self {
-        Self::empty_with_dtype(context, shape, DType::FP16)
+        Self::empty_with_dtype(context, shape, DType::F16)
     }
 
     /// Create a new tensor view with different shape but sharing the same underlying data
@@ -216,6 +241,44 @@ impl UnifiedTensor {
         let size = self.size_in_bytes();
         let staging = context.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Staging"),
+            size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        encoder.copy_buffer_to_buffer(&self.data.buffer, 0, &staging, 0, size);
+        context.queue.submit(Some(encoder.finish()));
+
+        let slice = staging.slice(..);
+        let (tx, rx) = futures_intrusive::channel::shared::oneshot_channel();
+        slice.map_async(wgpu::MapMode::Read, move |_| tx.send(()).unwrap());
+        context.device.poll(wgpu::Maintain::Wait);
+        rx.receive().await;
+
+        let data = slice.get_mapped_range();
+        let res = match self.dtype {
+            DType::F32 => bytemuck::cast_slice(&data).to_vec(),
+            DType::F16 => {
+                let f16_data: &[f16] = bytemuck::cast_slice(&data);
+                f16_data.iter().map(|&x| x.to_f32()).collect()
+            }
+            DType::BF16 => {
+                let bf16_data: &[bf16] = bytemuck::cast_slice(&data);
+                bf16_data.iter().map(|&x| x.to_f32()).collect()
+            }
+        };
+        drop(data);
+        staging.unmap();
+        res
+    }
+
+    pub async fn to_vec_f16(&self, context: &WgpuContext) -> Vec<f16> {
+        assert_eq!(self.dtype, DType::F16, "Tensor is not F16");
+        let size = self.size_in_bytes();
+        let staging = context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging F16"),
             size,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
@@ -270,6 +333,7 @@ pub struct ComputeEngine {
     matmul_at_pipeline: wgpu::ComputePipeline,
     matmul_bt_pipeline: wgpu::ComputePipeline,
     matmul_bk_bg_layout: wgpu::BindGroupLayout,
+
     sgd_pipeline: wgpu::ComputePipeline,
     sgd_bg_layout: wgpu::BindGroupLayout,
     adamw_pipeline: wgpu::ComputePipeline,
@@ -325,6 +389,24 @@ pub struct ComputeEngine {
     flash_attn_v2_bw_dq_pipeline: wgpu::ComputePipeline,
     flash_attn_v2_bw_dkdv_pipeline: wgpu::ComputePipeline,
     flash_attn_v2_bw_bg_layout: wgpu::BindGroupLayout,
+
+    // --- Flash Attention V2 (FP16) ---
+    flash_attn_v2_f16_pipeline: wgpu::ComputePipeline,
+    flash_attn_v2_f16_bg_layout: wgpu::BindGroupLayout,
+    flash_attn_v2_bf16_pipeline: wgpu::ComputePipeline,
+    flash_attn_v2_bf16_bg_layout: wgpu::BindGroupLayout,
+
+    // --- Mixed Precision Casting ---
+    cast_f32_to_f16_pipeline: wgpu::ComputePipeline,
+    cast_f16_to_f32_pipeline: wgpu::ComputePipeline,
+    cast_f32_to_bf16_pipeline: wgpu::ComputePipeline,
+    cast_bf16_to_f32_pipeline: wgpu::ComputePipeline,
+    cast_bg_layout: wgpu::BindGroupLayout,
+
+    // --- Mixed Precision Compute ---
+    matmul_f16_pipeline: wgpu::ComputePipeline,
+    matmul_bf16_pipeline: wgpu::ComputePipeline,
+    matmul_f16_bg_layout: wgpu::BindGroupLayout,
 }
 
 #[repr(C)]
@@ -344,8 +426,25 @@ impl ComputeEngine {
         // Concatenate kernel files
         let kernels_src = include_str!("kernels.wgsl");
         let flash_v2_src = include_str!("flash_attention_v2.wgsl");
+        let flash_v2_f16_src = include_str!("flash_attention_v2_f16.wgsl");
+        let flash_v2_bf16_src = include_str!("flash_attention_v2_bf16.wgsl");
         let flash_v2_bw_src = include_str!("flash_attention_v2_backward_optimized.wgsl");
-        let combined_src = format!("{}\n{}\n{}", kernels_src, flash_v2_src, flash_v2_bw_src);
+        let cast_src = include_str!("cast.wgsl");
+        let cast_bf16_src = include_str!("cast_bf16.wgsl");
+        let matmul_f16_src = include_str!("matmul_f16.wgsl");
+        let matmul_bf16_src = include_str!("matmul_bf16.wgsl");
+        let combined_src = format!(
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+            kernels_src,
+            flash_v2_src,
+            flash_v2_f16_src,
+            flash_v2_bf16_src,
+            flash_v2_bw_src,
+            cast_src,
+            cast_bf16_src,
+            matmul_f16_src,
+            matmul_bf16_src
+        );
 
         let module = ctx
             .device
@@ -1409,6 +1508,277 @@ impl ComputeEngine {
                     entry_point: "top_k",
                 });
 
+        // --- Mixed Precision Casting ---
+        let cast_bg_layout =
+            ctx.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("Cast Layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+
+        let cast_f32_to_f16_pipeline =
+            ctx.device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Cast F32 to F16 Pipeline"),
+                    layout: Some(&ctx.device.create_pipeline_layout(
+                        &wgpu::PipelineLayoutDescriptor {
+                            label: None,
+                            bind_group_layouts: &[&cast_bg_layout],
+                            push_constant_ranges: &[],
+                        },
+                    )),
+                    module: &module,
+                    entry_point: "cast_f32_to_f16",
+                });
+
+        let cast_f16_to_f32_pipeline =
+            ctx.device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Cast F16 to F32 Pipeline"),
+                    layout: Some(&ctx.device.create_pipeline_layout(
+                        &wgpu::PipelineLayoutDescriptor {
+                            label: None,
+                            bind_group_layouts: &[&cast_bg_layout],
+                            push_constant_ranges: &[],
+                        },
+                    )),
+                    module: &module,
+                    entry_point: "cast_f16_to_f32",
+                });
+
+        let cast_f32_to_bf16_pipeline =
+            ctx.device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Cast F32 to BF16 Pipeline"),
+                    layout: Some(&ctx.device.create_pipeline_layout(
+                        &wgpu::PipelineLayoutDescriptor {
+                            label: None,
+                            bind_group_layouts: &[&cast_bg_layout],
+                            push_constant_ranges: &[],
+                        },
+                    )),
+                    module: &module,
+                    entry_point: "cast_f32_to_bf16",
+                });
+
+        let cast_bf16_to_f32_pipeline =
+            ctx.device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Cast BF16 to F32 Pipeline"),
+                    layout: Some(&ctx.device.create_pipeline_layout(
+                        &wgpu::PipelineLayoutDescriptor {
+                            label: None,
+                            bind_group_layouts: &[&cast_bg_layout],
+                            push_constant_ranges: &[],
+                        },
+                    )),
+                    module: &module,
+                    entry_point: "cast_bf16_to_f32",
+                });
+
+        // --- Flash Attention V2 (FP16) ---
+        let flash_attn_v2_f16_bg_layout =
+            ctx.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("Flash Attn V2 F16 Layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 4,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+
+        let flash_attn_v2_f16_pipeline =
+            ctx.device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Flash Attn V2 F16 Pipeline"),
+                    layout: Some(&ctx.device.create_pipeline_layout(
+                        &wgpu::PipelineLayoutDescriptor {
+                            label: None,
+                            bind_group_layouts: &[&flash_attn_v2_f16_bg_layout],
+                            push_constant_ranges: &[],
+                        },
+                    )),
+                    module: &module,
+                    entry_point: "flash_attention_v2_f16",
+                });
+
+        let flash_attn_v2_bf16_bg_layout =
+            ctx.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("Flash Attn V2 BF16 Layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 2,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 3,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 4,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 5,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+
+        let flash_attn_v2_bf16_pipeline =
+            ctx.device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Flash Attn V2 BF16 Pipeline"),
+                    layout: Some(&ctx.device.create_pipeline_layout(
+                        &wgpu::PipelineLayoutDescriptor {
+                            label: None,
+                            bind_group_layouts: &[&flash_attn_v2_bf16_bg_layout],
+                            push_constant_ranges: &[],
+                        },
+                    )),
+                    module: &module,
+                    entry_point: "flash_attention_v2_bf16",
+                });
+
+        let matmul_bf16_pipeline =
+            ctx.device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("MatMul BF16 Pipeline"),
+                    layout: Some(&ctx.device.create_pipeline_layout(
+                        &wgpu::PipelineLayoutDescriptor {
+                            label: None,
+                            bind_group_layouts: &[&matmul_bg_layout], // Using standard matmul layout (compatible)
+                            push_constant_ranges: &[],
+                        },
+                    )),
+                    module: &module,
+                    entry_point: "matmul_bf16_tiled",
+                });
+
         Self {
             matmul_pipeline,
             matmul_bg_layout,
@@ -1449,6 +1819,16 @@ impl ComputeEngine {
             dequant_bg_layout,
             top_k_pipeline,
             top_k_bg_layout,
+            cast_bg_layout,
+            cast_f32_to_f16_pipeline,
+            cast_f16_to_f32_pipeline,
+            cast_f32_to_bf16_pipeline,
+            cast_bf16_to_f32_pipeline,
+            flash_attn_v2_f16_pipeline,
+            flash_attn_v2_f16_bg_layout,
+            flash_attn_v2_bf16_pipeline,
+            flash_attn_v2_bf16_bg_layout,
+            matmul_bf16_pipeline,
             affine_dequant_pipeline: {
                 let layout =
                     ctx.device
@@ -4602,6 +4982,147 @@ impl ComputeEngine {
         ctx.queue.submit(Some(encoder.finish()));
     }
 
+    pub fn flash_attention_v2_bf16(
+        &self,
+        ctx: &WgpuContext,
+        q: &UnifiedTensor,
+        k: &UnifiedTensor,
+        v: &UnifiedTensor,
+        mask: &UnifiedTensor,
+        out: &UnifiedTensor,
+        params: FlashV2Params,
+    ) {
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+
+        let params_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Flash V2 BF16 Params"),
+                contents: bytemuck::cast_slice(&[params]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Flash V2 BF16 Bind Group"),
+            layout: &self.flash_attn_v2_bf16_bg_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: q.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: k.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: v.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: out.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: mask.buffer().as_entire_binding(),
+                },
+            ],
+        });
+
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            pass.set_pipeline(&self.flash_attn_v2_bf16_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+
+            let seq_q = params.seq_q;
+            let num_heads: u32 = params.num_heads;
+            let batch_size: u32 = params.batch_size;
+
+            let y_groups = (seq_q + 31) / 32;
+            let z_groups = batch_size * num_heads;
+            pass.dispatch_workgroups(1, y_groups, z_groups);
+        }
+        ctx.queue.submit(Some(encoder.finish()));
+    }
+
+    pub fn flash_attention_v2_f16(
+        &self,
+        ctx: &WgpuContext,
+        q: &UnifiedTensor,
+        k: &UnifiedTensor,
+        v: &UnifiedTensor,
+        mask: &UnifiedTensor,
+        out: &UnifiedTensor,
+        params: &FlashParams,
+    ) {
+        let params_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Flash Attention V2 (FP16) Params"),
+                contents: bytemuck::cast_slice(&[*params]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Flash Attention V2 (FP16) Bind Group"),
+            layout: &self.flash_attn_v2_f16_bg_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: q.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: k.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: v.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: out.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: params_buf.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: mask.buffer().as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            pass.set_pipeline(&self.flash_attn_v2_f16_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+
+            // Workgroup size: (32, 4, 1)
+            // Global Y: (seq_q + 31) / 32
+            // Global Z: batch * num_heads
+
+            let seq_q = params.seq_q;
+            let num_heads: u32 = params.num_heads;
+            let batch_size: u32 = params.batch_size;
+
+            let y_groups = (seq_q + 31) / 32;
+            let z_groups = batch_size * num_heads;
+            pass.dispatch_workgroups(1, y_groups, z_groups);
+        }
+        ctx.queue.submit(Some(encoder.finish()));
+    }
+
     pub fn sgd_update(
         &self,
         ctx: &WgpuContext,
@@ -4643,6 +5164,160 @@ impl ComputeEngine {
             pass.set_bind_group(0, &bg, &[]);
             let total_elements = weight.shape.iter().product::<usize>();
             pass.dispatch_workgroups((total_elements as u32 + 63) / 64, 1, 1);
+        }
+        ctx.queue.submit(Some(encoder.finish()));
+    }
+
+    pub fn cast(&self, ctx: &WgpuContext, input: &UnifiedTensor, output: &UnifiedTensor) {
+        let pipeline = match (input.dtype, output.dtype) {
+            (DType::F32, DType::F16) => &self.cast_f32_to_f16_pipeline,
+            (DType::F16, DType::F32) => &self.cast_f16_to_f32_pipeline,
+            (DType::F32, DType::BF16) => &self.cast_f32_to_bf16_pipeline,
+            (DType::BF16, DType::F32) => &self.cast_bf16_to_f32_pipeline,
+            _ => panic!("Unsupported cast: {:?} -> {:?}", input.dtype, output.dtype),
+        };
+        // ... (rest of cast implementation) ...
+        let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Cast Bind Group"),
+            layout: &self.cast_bg_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: input.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: output.buffer().as_entire_binding(),
+                },
+            ],
+        });
+
+        let total_elements = input.shape.iter().product::<usize>();
+        // Process 2 elements per thread (packed)
+        let num_packed = (total_elements + 1) / 2;
+
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups((num_packed as u32 + 63) / 64, 1, 1);
+        }
+        ctx.queue.submit(Some(encoder.finish()));
+    }
+
+    pub fn matmul_f16(
+        &self,
+        ctx: &WgpuContext,
+        a: &UnifiedTensor,
+        b: &UnifiedTensor,
+        out: &UnifiedTensor,
+    ) {
+        let m = a.shape[0] as u32;
+        let k = a.shape[1] as u32;
+        let n = b.shape[1] as u32;
+
+        let params = [m, k, n, 0];
+        let params_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("MatMul F16 Params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("MatMul F16 Bind Group"),
+            layout: &self.matmul_f16_bg_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: a.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: out.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            pass.set_pipeline(&self.matmul_f16_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            let x_groups = (n + 15) / 16;
+            let y_groups = (m + 15) / 16;
+            pass.dispatch_workgroups(x_groups, y_groups, 1);
+        }
+        ctx.queue.submit(Some(encoder.finish()));
+    }
+
+    pub fn matmul_bf16(
+        &self,
+        ctx: &WgpuContext,
+        a: &UnifiedTensor,
+        b: &UnifiedTensor,
+        out: &UnifiedTensor,
+    ) {
+        let m = a.shape[0] as u32;
+        let k = a.shape[1] as u32;
+        let n = b.shape[1] as u32;
+
+        let params = [m, k, n, 0];
+        let params_buf = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("MatMul BF16 Params"),
+                contents: bytemuck::cast_slice(&params),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
+
+        let bg = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("MatMul BF16 Bind Group"),
+            layout: &self.matmul_bg_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: a.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: b.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: out.buffer().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buf.as_entire_binding(),
+                },
+            ],
+        });
+
+        let mut encoder = ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+            pass.set_pipeline(&self.matmul_bf16_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            let x_groups = (n + 15) / 16;
+            let y_groups = (m + 15) / 16;
+            pass.dispatch_workgroups(x_groups, y_groups, 1);
         }
         ctx.queue.submit(Some(encoder.finish()));
     }

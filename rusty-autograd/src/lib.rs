@@ -1,4 +1,4 @@
-use rusty_backend::{AdamParams, ComputeEngine, UnifiedTensor, WgpuContext};
+use rusty_backend::{AdamParams, ComputeEngine, DType, UnifiedTensor, WgpuContext};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,6 +20,7 @@ impl std::fmt::Debug for Tensor {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.debug_struct("Tensor")
             .field("shape", &self.data.shape)
+            .field("dtype", &self.data.dtype)
             .finish()
     }
 }
@@ -150,11 +151,41 @@ impl AutogradNode for MatMulNode {
         vec![self.a.clone(), self.b.clone()]
     }
     fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
-        let grad_a = UnifiedTensor::empty(&self.a.ctx, &self.a.data.shape);
-        engine.matmul_bt(&self.a.ctx, grad, &self.b.data, &grad_a);
-        let grad_b = UnifiedTensor::empty(&self.b.ctx, &self.b.data.shape);
-        engine.matmul_at(&self.a.ctx, &self.a.data, grad, &grad_b);
-        vec![grad_a, grad_b]
+        if self.a.data.dtype == DType::FP16 {
+            // Cast to F32 for backward computation
+            let a_f32 =
+                UnifiedTensor::empty_with_dtype(&self.a.ctx, &self.a.data.shape, DType::FP32);
+            engine.cast(&self.a.ctx, &self.a.data, &a_f32);
+
+            let b_f32 =
+                UnifiedTensor::empty_with_dtype(&self.b.ctx, &self.b.data.shape, DType::FP32);
+            engine.cast(&self.b.ctx, &self.b.data, &b_f32);
+
+            let grad_a_f32 =
+                UnifiedTensor::empty_with_dtype(&self.a.ctx, &self.a.data.shape, DType::FP32);
+            engine.matmul_bt(&self.a.ctx, grad, &b_f32, &grad_a_f32);
+
+            let grad_b_f32 =
+                UnifiedTensor::empty_with_dtype(&self.b.ctx, &self.b.data.shape, DType::FP32);
+            engine.matmul_at(&self.a.ctx, &a_f32, grad, &grad_b_f32);
+
+            // Cast gradients back to F16
+            let grad_a =
+                UnifiedTensor::empty_with_dtype(&self.a.ctx, &self.a.data.shape, DType::FP16);
+            engine.cast(&self.a.ctx, &grad_a_f32, &grad_a);
+
+            let grad_b =
+                UnifiedTensor::empty_with_dtype(&self.b.ctx, &self.b.data.shape, DType::FP16);
+            engine.cast(&self.b.ctx, &grad_b_f32, &grad_b);
+
+            vec![grad_a, grad_b]
+        } else {
+            let grad_a = UnifiedTensor::empty(&self.a.ctx, &self.a.data.shape);
+            engine.matmul_bt(&self.a.ctx, grad, &self.b.data, &grad_a);
+            let grad_b = UnifiedTensor::empty(&self.b.ctx, &self.b.data.shape);
+            engine.matmul_at(&self.a.ctx, &self.a.data, grad, &grad_b);
+            vec![grad_a, grad_b]
+        }
     }
 }
 
@@ -467,8 +498,15 @@ where
 impl Tensor {
     pub fn matmul(a: &Tensor, b: &Tensor, engine: &ComputeEngine) -> Tensor {
         let out_shape = vec![a.data.shape[0], b.data.shape[1]];
+        // Output for mixed precision is F32 (accumulation)
         let out_data = UnifiedTensor::empty(&a.ctx, &out_shape);
-        engine.matmul(&a.ctx, &a.data, &b.data, &out_data);
+
+        if a.data.dtype == DType::FP16 && b.data.dtype == DType::FP16 {
+            engine.matmul_f16(&a.ctx, &a.data, &b.data, &out_data);
+        } else {
+            engine.matmul(&a.ctx, &a.data, &b.data, &out_data);
+        }
+
         let node = Arc::new(MatMulNode {
             a: a.clone(),
             b: b.clone(),
@@ -564,6 +602,20 @@ impl Tensor {
         Tensor::with_creator(up.ctx.clone(), out_data, node)
     }
 
+    pub fn cast(input: &Tensor, dtype: DType, engine: &ComputeEngine) -> Tensor {
+        if input.data.dtype == dtype {
+            return input.clone();
+        }
+        let out_data = UnifiedTensor::empty_with_dtype(&input.ctx, &input.data.shape, dtype);
+        engine.cast(&input.ctx, &input.data, &out_data);
+        let node = Arc::new(CastNode {
+            input: input.clone(),
+            output_dtype: dtype,
+            input_dtype: input.data.dtype,
+        });
+        Tensor::with_creator(input.ctx.clone(), out_data, node)
+    }
+
     /// Flash Attention V2 (Fused)
     pub fn flash_attention(
         q: &Tensor,
@@ -602,6 +654,28 @@ impl Tensor {
         });
 
         Tensor::with_creator(q.ctx.clone(), out_data, node)
+    }
+}
+
+pub struct CastNode {
+    pub input: Tensor,
+    pub output_dtype: DType,
+    pub input_dtype: DType,
+}
+
+impl AutogradNode for CastNode {
+    fn inputs(&self) -> Vec<Tensor> {
+        vec![self.input.clone()]
+    }
+
+    fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
+        let grad_input = UnifiedTensor::empty_with_dtype(
+            &self.input.ctx,
+            &self.input.data.shape,
+            self.input_dtype,
+        );
+        engine.cast(&self.input.ctx, grad, &grad_input);
+        vec![grad_input]
     }
 }
 
@@ -859,5 +933,67 @@ impl LRScheduler for WarmupCosineScheduler {
 
     fn current_step(&self) -> usize {
         self.current
+    }
+}
+
+// --- Mixed Precision Training ---
+
+pub struct GradScaler {
+    pub scale: f32,
+}
+
+impl GradScaler {
+    pub fn new() -> Self {
+        Self { scale: 65536.0 }
+    }
+
+    pub fn scale(&self, tensor: &Tensor) -> Tensor {
+        let out_data = UnifiedTensor::empty(&tensor.ctx, &tensor.data.shape);
+        tensor
+            .ctx
+            .compute_engine
+            .copy_tensor(&tensor.ctx, &tensor.data, &out_data, 0);
+        tensor
+            .ctx
+            .compute_engine
+            .scale_tensor(&tensor.ctx, &out_data, self.scale);
+
+        let node = Arc::new(ScaleNode {
+            input: tensor.clone(),
+            scale: self.scale,
+        });
+        Tensor::with_creator(tensor.ctx.clone(), out_data, node)
+    }
+
+    pub fn unscale(&self, params: &[Tensor]) {
+        let inv_scale = 1.0 / self.scale;
+        for p in params {
+            let grad_opt = p.grad.borrow();
+            if let Some(grad) = grad_opt.as_ref() {
+                p.ctx.compute_engine.scale_tensor(&p.ctx, grad, inv_scale);
+            }
+        }
+    }
+
+    pub fn update(&mut self) {
+        // Placeholder for dynamic scaling update
+    }
+}
+
+pub struct ScaleNode {
+    input: Tensor,
+    scale: f32,
+}
+
+impl AutogradNode for ScaleNode {
+    fn inputs(&self) -> Vec<Tensor> {
+        vec![self.input.clone()]
+    }
+    fn backward(&self, grad: &UnifiedTensor, engine: &ComputeEngine) -> Vec<UnifiedTensor> {
+        let grad_input = UnifiedTensor::empty(&self.input.ctx, &self.input.data.shape);
+        // grad_input = grad * scale
+        engine.copy_tensor(&self.input.ctx, grad, &grad_input, 0);
+        engine.scale_tensor(&self.input.ctx, &grad_input, self.scale);
+        vec![grad_input]
     }
 }

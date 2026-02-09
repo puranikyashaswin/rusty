@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 rusty-backend = { path = "../rusty-backend" }
+half = { version = "2.7.1", features = ["bytemuck"] }
