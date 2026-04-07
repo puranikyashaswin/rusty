@@ -1,16 +1,16 @@
 # Contributing to Rusty
 
-Thank you for your interest in contributing to Rusty! This document provides guidelines for contributing to the project.
+Thank you for your interest in contributing to Rusty! This document provides guidelines and instructions for contributing.
 
-## Getting Started
+## Development Setup
 
 ### Prerequisites
 
-- Rust 1.75 or later
-- macOS with Apple Silicon (M1/M2/M3) or any platform with Vulkan support
+- Rust 1.75 or later (stable channel)
 - Git
+- A GPU with WebGPU support (for running tests and benchmarks)
 
-### Setting Up Development Environment
+### Setup
 
 ```bash
 # Clone the repository
@@ -18,104 +18,88 @@ git clone https://github.com/puranikyashaswin/rusty.git
 cd rusty
 
 # Build the project
-cargo build
+cargo build --workspace
 
 # Run tests
 cargo test --workspace
 
-# Run benchmarks
-cargo run -p rusty-benchmarks --release
+# Run clippy for linting
+cargo clippy --workspace -- -D warnings
+
+# Format code
+cargo fmt --all
 ```
 
 ## Code Style
 
-We follow standard Rust conventions:
-
-- Use `rustfmt` for formatting: `cargo fmt`
-- Use `clippy` for linting: `cargo clippy`
-- Write documentation for public APIs
-- Add tests for new functionality
-
-### Naming Conventions
-
-- **Structs**: PascalCase (`UnifiedTensor`, `ComputeEngine`)
-- **Functions**: snake_case (`matmul`, `flash_attention`)
-- **Constants**: SCREAMING_SNAKE_CASE (`WORKGROUP_SIZE`)
-- **WGSL Kernels**: snake_case with descriptive names
-
-## Project Structure
-
-```
-rusty/
-├── rusty-backend/     # Core GPU compute (modify WGSL kernels here)
-├── rusty-autograd/    # Automatic differentiation
-├── rusty-graph/       # Neural network layers
-├── rusty-loader/      # Model loading
-├── rusty-trainer/     # Training utilities
-├── rusty-hub/         # HuggingFace integration
-├── rusty-cli/         # CLI tool
-└── benchmarks/        # Performance tests
-```
-
-## Areas for Contribution
-
-### Good First Issues
-
-- Add more documentation examples
-- Improve error messages
-- Add unit tests
-
-### Intermediate
-
-- Optimize existing WGSL kernels
-- Add new activation functions
-- Implement new optimizer variants
-
-### Advanced
-
-- Add CUDA backend support
-- Implement distributed training
-- Add INT4/INT8 quantization
-
-## Making Changes
-
-### 1. Create a Branch
+We follow standard Rust formatting conventions. Before submitting a PR:
 
 ```bash
-git checkout -b feature/your-feature-name
+cargo fmt --all
+cargo clippy --workspace -- -D warnings
 ```
 
-### 2. Make Your Changes
+### Guidelines
 
-- Keep commits atomic and focused
-- Write clear commit messages
-- Add tests for new functionality
+- Use descriptive variable names (avoid single-letter names except in iterators)
+- Document all public items with doc comments
+- Write tests for new functionality
+- Handle errors gracefully (avoid `.unwrap()` in user-facing code)
+- Follow the existing code structure and patterns
 
-### 3. Test Your Changes
+## Pull Request Process
 
-```bash
-# Run all tests
-cargo test --workspace
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Add tests for new functionality
+5. Ensure all tests pass (`cargo test --workspace`)
+6. Run clippy and fix any warnings (`cargo clippy --workspace -- -D warnings`)
+7. Format your code (`cargo fmt --all`)
+8. Commit your changes with clear commit messages
+9. Push to your fork
+10. Open a Pull Request
 
-# Check formatting
-cargo fmt -- --check
+### Commit Messages
 
-# Run clippy
-cargo clippy --workspace
+Follow [Conventional Commits](https://www.conventionalcommits.org/) specification:
 
-# Run benchmarks (if modifying perf-critical code)
-cargo run -p rusty-benchmarks --release
+- `feat:` - New features
+- `fix:` - Bug fixes
+- `docs:` - Documentation changes
+- `refactor:` - Code refactoring
+- `test:` - Adding or updating tests
+- `chore:` - Maintenance tasks
+
+Examples:
+```
+feat: add tensor broadcasting support
+fix: prevent NaN panic in argmax
+docs: add installation guide
+refactor: simplify gradient computation
 ```
 
-### 4. Submit a Pull Request
+## Architecture Overview
 
-- Provide a clear description of the changes
-- Reference any related issues
-- Ensure CI passes
+Rusty is organized as a Cargo workspace with the following crates:
 
-## Testing Guidelines
+- `rusty` - Core library (tensors, autograd, neural network modules)
+- `rusty-backend` - GPU compute engine and WGSL kernels
+- `rusty-autograd` - Automatic differentiation engine
+- `rusty-cli` - Command-line interface
+- `rusty-trainer` - Training utilities and abstractions
+- `rusty-graph` - Model loading and graph construction
+- `rusty-loader` - Model file loading (safetensors, etc.)
+- `rusty-compiler` - Runtime kernel compilation
+- `rusty-monitor` - Training metrics and monitoring
+- `rusty-hub` - Model hub for downloading pre-trained models
+- `benchmarks` - Performance benchmarks
+
+## Testing
 
 ### Unit Tests
+
+Add unit tests alongside your code:
 
 ```rust
 #[cfg(test)]
@@ -123,54 +107,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tensor_creation() {
-        // Test implementation
+    fn test_my_function() {
+        // ...
     }
 }
 ```
 
 ### Integration Tests
 
-Place integration tests in `tests/` directories within each crate.
+Add integration tests in the `tests/` directory of each crate.
 
-## Documentation
+### Running Tests
 
-- Add rustdoc comments for public APIs
-- Include code examples where helpful
-- Update README.md for significant changes
+```bash
+# All tests
+cargo test --workspace
 
-```rust
-/// Performs matrix multiplication on GPU.
-/// 
-/// # Arguments
-/// * `a` - Left matrix [M, K]
-/// * `b` - Right matrix [K, N]
-/// * `out` - Output matrix [M, N]
-/// 
-/// # Example
-/// ```rust
-/// engine.matmul(&ctx, &a, &b, &out);
-/// ```
-pub fn matmul(&self, ctx: &WgpuContext, a: &UnifiedTensor, b: &UnifiedTensor, out: &UnifiedTensor)
+# Specific crate
+cargo test -p rusty
+
+# Specific test
+cargo test test_name
 ```
 
-## Pull Request Process
+## Reporting Issues
 
-1. Update documentation as needed
-2. Add tests for new functionality
-3. Ensure all tests pass
-4. Request review from maintainers
-5. Address feedback promptly
-
-## Questions?
-
-- Open an issue for bugs or feature requests
-- Start a discussion for questions
+- **Bug reports**: Include Rust version, OS, and steps to reproduce
+- **Feature requests**: Describe the use case and proposed solution
+- **Security issues**: Report privately via security email
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
-
----
-
-Thank you for contributing to Rusty!
+By contributing, you agree that your contributions will be licensed under the project's license.

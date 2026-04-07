@@ -28,6 +28,7 @@ pub struct AdamW {
     eps: f32,
     weight_decay: f32,
     t: usize,
+    max_grad_norm: Option<f32>, // Gradient clipping
     // First moment estimates
     m: Vec<Vec<f32>>,
     // Second moment estimates
@@ -48,6 +49,7 @@ impl AdamW {
             eps: 1e-8,
             weight_decay: 0.01,
             t: 0,
+            max_grad_norm: None,
             m,
             v,
         }
@@ -73,6 +75,7 @@ impl AdamW {
             eps,
             weight_decay,
             t: 0,
+            max_grad_norm: None,
             m,
             v,
         }
@@ -95,6 +98,15 @@ impl AdamW {
         self.beta2 = beta2;
         self
     }
+
+    /// Enable gradient clipping by norm.
+    ///
+    /// Gradients are clipped to have a maximum L2 norm of `max_norm`.
+    /// This helps prevent exploding gradients during training.
+    pub fn clip_grad_norm(mut self, max_norm: f32) -> Self {
+        self.max_grad_norm = Some(max_norm);
+        self
+    }
 }
 
 impl Optimizer for AdamW {
@@ -102,9 +114,39 @@ impl Optimizer for AdamW {
         self.t += 1;
         let t = self.t as f32;
 
+        // Gradient clipping: compute global norm first
+        if let Some(max_norm) = self.max_grad_norm {
+            let mut global_norm_sq = 0.0f32;
+
+            for param in &self.params {
+                if let Some(grad_tensor) = param.grad() {
+                    let grad = grad_tensor.to_vec();
+                    global_norm_sq += grad.iter().map(|g| g * g).sum::<f32>();
+                }
+            }
+
+            let global_norm = global_norm_sq.sqrt();
+            if global_norm > max_norm {
+                let scale = max_norm / global_norm;
+                // Apply scaling in the next loop
+            }
+        }
+
         for (i, param) in self.params.iter().enumerate() {
             if let Some(grad_tensor) = param.grad() {
-                let grad = grad_tensor.to_vec();
+                let mut grad = grad_tensor.to_vec();
+
+                // Apply gradient clipping if enabled
+                if let Some(max_norm) = self.max_grad_norm {
+                    let grad_norm = grad.iter().map(|g| g * g).sum::<f32>().sqrt();
+                    if grad_norm > max_norm {
+                        let scale = max_norm / grad_norm;
+                        for g in &mut grad {
+                            *g *= scale;
+                        }
+                    }
+                }
+
                 let mut weights = param.to_vec();
 
                 // Update biased first moment estimate
