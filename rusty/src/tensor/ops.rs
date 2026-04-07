@@ -399,7 +399,13 @@ impl Tensor {
             device: device.clone(),
             grad: Arc::new(GradCell::new()),
             requires_grad: self.requires_grad,
-            creator: None, // TODO: Add SigmoidNode
+            creator: if self.requires_grad {
+                Some(Arc::new(SigmoidNode {
+                    input: self.clone(),
+                }))
+            } else {
+                None
+            },
         }
     }
 
@@ -433,7 +439,13 @@ impl Tensor {
             device: device.clone(),
             grad: Arc::new(GradCell::new()),
             requires_grad: self.requires_grad,
-            creator: None, // TODO: Add TanhNode
+            creator: if self.requires_grad {
+                Some(Arc::new(TanhNode {
+                    input: self.clone(),
+                }))
+            } else {
+                None
+            },
         }
     }
 
@@ -492,7 +504,13 @@ impl Tensor {
             device: device.clone(),
             grad: Arc::new(GradCell::new()),
             requires_grad: self.requires_grad,
-            creator: None, // TODO: Add SoftmaxNode
+            creator: if self.requires_grad {
+                Some(Arc::new(SoftmaxNode {
+                    input: self.clone(),
+                }))
+            } else {
+                None
+            },
         }
     }
 

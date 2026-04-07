@@ -263,7 +263,7 @@ impl Tensor {
     /// Get the gradient if it exists.
     pub fn grad(&self) -> Option<Tensor> {
         self.grad.get().map(|buffer| Tensor {
-            buffer: Arc::new(buffer),
+            buffer: buffer.clone(),
             shape: self.shape.clone(),
             device: self.device.clone(),
             grad: Arc::new(GradCell::new()),
@@ -297,7 +297,7 @@ impl Tensor {
             if let Some(ref creator) = tensor.creator {
                 if let Some(grad_buffer) = tensor.grad.get() {
                     let grad_tensor = Tensor {
-                        buffer: Arc::new(grad_buffer),
+                        buffer: grad_buffer.clone(),
                         shape: tensor.shape.clone(),
                         device: tensor.device.clone(),
                         grad: Arc::new(GradCell::new()),

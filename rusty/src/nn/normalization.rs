@@ -49,25 +49,36 @@ impl Module for LayerNorm {
         // TODO: Optimize with GPU kernel
         let data = x.to_vec();
         let size = self.normalized_shape.iter().product::<usize>();
+        
+        // Assume the last dimension is the normalization dimension
+        let total_elements = data.len();
+        let num_rows = total_elements / size;
 
-        // Compute mean and variance
-        let mean: f32 = data.iter().sum::<f32>() / size as f32;
-        let variance: f32 = data.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / size as f32;
-        let inv_std = 1.0 / (variance + self.eps).sqrt();
-
-        // Normalize and apply affine
+        // Compute mean and variance per row
         let gamma_data = self.gamma.to_vec();
         let beta_data = self.beta.to_vec();
 
-        let result: Vec<f32> = data
-            .iter()
-            .enumerate()
-            .map(|(i, &v)| {
+        let mut result = Vec::with_capacity(total_elements);
+        
+        for row in 0..num_rows {
+            let row_start = row * size;
+            let row_end = row_start + size;
+            let row_data = &data[row_start..row_end];
+            
+            // Compute mean for this row
+            let mean: f32 = row_data.iter().sum::<f32>() / size as f32;
+            
+            // Compute variance for this row
+            let variance: f32 = row_data.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / size as f32;
+            let inv_std = 1.0 / (variance + self.eps).sqrt();
+
+            // Normalize and apply affine for this row
+            for (i, &v) in row_data.iter().enumerate() {
                 let idx = i % size;
                 let normalized = (v - mean) * inv_std;
-                normalized * gamma_data[idx] + beta_data[idx]
-            })
-            .collect();
+                result.push(normalized * gamma_data[idx] + beta_data[idx]);
+            }
+        }
 
         Tensor::from_data(&result, &x.shape, &x.device)
     }
@@ -133,22 +144,30 @@ impl Module for RMSNorm {
         // CPU fallback for now
         let data = x.to_vec();
         let size = self.hidden_size;
-
-        // Compute RMS
-        let sq_sum: f32 = data.iter().map(|v| v * v).sum::<f32>();
-        let rms = (sq_sum / size as f32 + self.eps).sqrt();
-        let inv_rms = 1.0 / rms;
+        
+        let total_elements = data.len();
+        let num_rows = total_elements / size;
 
         // Normalize and scale
         let weight_data = self.weight.to_vec();
-        let result: Vec<f32> = data
-            .iter()
-            .enumerate()
-            .map(|(i, &v)| {
+        let mut result = Vec::with_capacity(total_elements);
+        
+        for row in 0..num_rows {
+            let row_start = row * size;
+            let row_end = row_start + size;
+            let row_data = &data[row_start..row_end];
+            
+            // Compute RMS for this row
+            let sq_sum: f32 = row_data.iter().map(|v| v * v).sum::<f32>();
+            let rms = (sq_sum / size as f32 + self.eps).sqrt();
+            let inv_rms = 1.0 / rms;
+
+            // Normalize and scale for this row
+            for (i, &v) in row_data.iter().enumerate() {
                 let idx = i % size;
-                v * inv_rms * weight_data[idx]
-            })
-            .collect();
+                result.push(v * inv_rms * weight_data[idx]);
+            }
+        }
 
         Tensor::from_data(&result, &x.shape, &x.device)
     }
